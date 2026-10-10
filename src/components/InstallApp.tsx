@@ -44,11 +44,11 @@ export function InstallApp({ app, offlineReady }: { app: ReturnType<typeof useAp
   const ios = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
   useEffect(() => { if (app.installed) setHelp(false); }, [app.installed]);
   useEffect(() => { if (app.error) setHelp(true); }, [app.error]);
-  if (app.installed) return <span className="text-[10px] text-emerald-300 shrink-0" role="status">Installed ✓</span>;
+  if (app.installed) return <span className="text-[10px] text-emerald-300 shrink-0 text-right leading-tight" role="status">Installed ✓<br />launch from home screen</span>;
   return <>
     <button type="button" disabled={app.busy} onClick={() => { if (app.ready) void app.install(); else setHelp(true); }}
-      className="min-h-11 px-2 rounded-lg border border-cyan-300/40 bg-cyan-300/10 text-cyan-200 text-xs font-bold shrink-0 disabled:opacity-50"
-      aria-label="Install ZESA Survivor app">{app.busy ? 'Installing…' : 'Install app'}</button>
+      className="min-h-11 px-3 rounded-lg border border-cyan-300/40 bg-cyan-300/10 text-cyan-200 text-sm font-bold shrink-0 disabled:opacity-50"
+      aria-label="Install ZESA Survivor app">{app.busy ? 'Installing…' : app.ready ? 'Install app ⚡' : 'Install app'}</button>
     {app.error && <span role="status" className="sr-only">Installation could not start. Tap Install app for instructions.</span>}
     {help && <div className="absolute inset-0 z-50 bg-slate-950/95 overflow-y-auto p-4" role="dialog" aria-modal="true" aria-label="Install ZESA Survivor" ref={dialog}
       onKeyDown={(event) => { if (event.key === 'Escape') { event.stopPropagation(); setHelp(false); } }}>

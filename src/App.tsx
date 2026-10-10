@@ -95,6 +95,8 @@ export default function App() {
   const pausedMsRef = useRef(0);
   const aimRef = useRef({ active: false, x: 0, level: 1, charged: false });
   const fpsEmaRef = useRef(60);
+  const perfModeRef = useRef(1);
+  const lastPerfCheckRef = useRef(0);
   const gameOverSavedRef = useRef(false);
   const accumulatorRef = useRef(0);
   const mergeEffectsRef = useRef<Array<{x: number; y: number; tier: number; combo: number; start: number}>>([]);
@@ -224,6 +226,24 @@ export default function App() {
           if (rawDt > 0) {
             const fps = 1 / Math.max(rawDt, 1e-4);
             fpsEmaRef.current = fpsEmaRef.current * 0.95 + fps * 0.05;
+          }
+
+          // Adaptive perf for low-end devices: sustained <28fps sheds enemy
+          // cap and speed via engine low mode; recovers above 40. Checked
+          // once a second, only on change. High mode is never imposed.
+          if (time - lastPerfCheckRef.current > 1000) {
+            lastPerfCheckRef.current = time;
+            const u = universeRef.current;
+            const fps = fpsEmaRef.current;
+            if (u && startedRef.current) {
+              if (perfModeRef.current !== 0 && fps < 28) {
+                u.set_perf_mode(0);
+                perfModeRef.current = 0;
+              } else if (perfModeRef.current === 0 && fps > 40) {
+                u.set_perf_mode(1);
+                perfModeRef.current = 1;
+              }
+            }
           }
 
           const universe = universeRef.current;
@@ -763,6 +783,8 @@ export default function App() {
     prevMergesRef.current = 0;
     prevGaugeRef.current = 0;
     prevRelayCountRef.current = 0;
+    perfModeRef.current = 1;
+    lastPerfCheckRef.current = 0;
     prevHpRef.current = 100;
     pausedMsRef.current = 0;
     aimRef.current = { active: false, x: 0, level: 1, charged: false };
@@ -939,6 +961,11 @@ export default function App() {
 
         {/* CRT scanlines over gameplay, under UI */}
         <div aria-hidden className="scanlines absolute inset-0 z-[5] pointer-events-none opacity-20" />
+
+        {/* Rotated touch players: portrait is the designed arena. */}
+        <div aria-hidden className="rotate-hint absolute top-2 left-1/2 -translate-x-1/2 z-30 pointer-events-none items-center gap-1.5 rounded-full bg-slate-900/85 border border-slate-700 px-3 py-1.5 text-[11px] font-bold text-amber-200">
+          <span>⟳</span><span>Rotate for the full grid</span>
+        </div>
 
         {/* Pause + mute controls */}
         {started && !gameOver && !loading && !loadError && (

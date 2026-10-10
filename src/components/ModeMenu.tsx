@@ -213,7 +213,7 @@ export const ModeMenu: React.FC<Props> = ({ appInstall, bestStars, bestScores, r
 
           </details>
           <p className="text-xs text-slate-400 text-center mt-3" role="status">{offlineReady ? 'Ready for offline play · no account' : 'Offline play after first download · no account'}</p>
-          {needRefresh && <button onClick={onRefresh} className="w-full mt-3 rounded-lg bg-indigo-600 text-white font-bold py-3">Install game update</button>}
+          {needRefresh && <button onClick={onRefresh} className="w-full mt-3 rounded-lg bg-indigo-600 text-white font-bold py-3">Update game</button>}
         </div>
       </div>
 
