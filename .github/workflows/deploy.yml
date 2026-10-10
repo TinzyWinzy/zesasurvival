@@ -23,6 +23,11 @@ jobs:
         with:
           targets: wasm32-unknown-unknown
 
+      # Belt-and-suspenders: guarantee the wasm target regardless of how the
+      # action resolves the runner's default toolchain. Idempotent.
+      - name: Ensure wasm32 target
+        run: rustup target add wasm32-unknown-unknown
+
       - name: Cache Rust Dependencies
         uses: swatinem/rust-cache@v2
         with:
