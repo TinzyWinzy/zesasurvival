@@ -90,6 +90,7 @@ export default function App() {
   const loadoutRef = useRef<Loadout>(1);
   const prevMergesRef = useRef(0);
   const prevGaugeRef = useRef(0);
+  const prevRelayCountRef = useRef(0);
   const prevHpRef = useRef(100);
   const pausedMsRef = useRef(0);
   const aimRef = useRef({ active: false, x: 0, level: 1, charged: false });
@@ -290,6 +291,13 @@ export default function App() {
               sfx.merge(pcombo);
             }
             mergesRef.current = pmerges;
+            // Relay loss reads like any other battlefield event, not a vanishing.
+            if (prelayCount < prevRelayCountRef.current && !pvictory && !universe.is_game_over()) {
+              const id = ++toastIdRef.current;
+              setToasts((t) => [...t.slice(-2), { id, title: 'Relay lost', desc: 'The line takes its cut.' }]);
+              setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 3000);
+            }
+            prevRelayCountRef.current = prelayCount;
             // Wave banners (non-blocking) + stinger + music intensity.
             if (pwave > waveRef.current) {
               waveRef.current = pwave;
@@ -754,6 +762,7 @@ export default function App() {
     waveRef.current = 1;
     prevMergesRef.current = 0;
     prevGaugeRef.current = 0;
+    prevRelayCountRef.current = 0;
     prevHpRef.current = 100;
     pausedMsRef.current = 0;
     aimRef.current = { active: false, x: 0, level: 1, charged: false };

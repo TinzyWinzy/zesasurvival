@@ -90,9 +90,12 @@ const RELAY_RANGE: f32 = 220.0;
 const RELAY_FIRE_INTERVAL: f32 = 1.5;
 const RELAY_DAMAGE: f32 = 18.0;
 const RELAY_BEAM_HALF_WIDTH: f32 = 18.0;
-const RELAY_HP: f32 = 40.0;
+const RELAY_HP: f32 = 100.0;
 const RELAY_RADIUS: f32 = 12.0;
-const RELAY_TOUCH_DPS: f32 = 16.0;
+// Grind, not vaporize: per-enemy contact rate, capped in total so a pile-on
+// still takes seconds — a lone relay should win time, not die instantly.
+const RELAY_TOUCH_DPS: f32 = 10.0;
+const RELAY_MAX_INCOMING_DPS: f32 = 20.0;
 
 /// Regulatory-style pity engine: variable-ratio drops with a hard
 /// guarantee rail — no dry run longer than threshold-1 kills.
@@ -761,16 +764,20 @@ impl Universe {
         // 4b. Friendly relays: grind under contact, then fire on the nearest
         // enemy in range. Collected first so relay kills still drop energy.
         let mut relay_shots: Vec<(f32, f32, f32, f32)> = Vec::new();
+        let mut relay_deaths: Vec<(f32, f32)> = Vec::new();
         for relay in self.relays.iter_mut() {
+            let mut incoming = 0.0;
             for enemy in self.enemies.iter() {
                 let dx = enemy.x - relay.x;
                 let dy = enemy.y - relay.y;
                 let touch = enemy.radius + RELAY_RADIUS;
                 if dx * dx + dy * dy <= touch * touch {
-                    relay.hp -= RELAY_TOUCH_DPS * dt;
+                    incoming += RELAY_TOUCH_DPS * dt;
                 }
             }
+            relay.hp -= incoming.min(RELAY_MAX_INCOMING_DPS * dt);
             if relay.hp <= 0.0 {
+                relay_deaths.push((relay.x, relay.y));
                 continue;
             }
             relay.cooldown -= dt;
@@ -798,6 +805,24 @@ impl Universe {
             }
         }
         self.relays.retain(|r| r.hp > 0.0);
+        // Fallen relays burst into sparks so the loss reads on the field.
+        for (dx, dy) in relay_deaths {
+            for k in 0..10 {
+                if self.particles.len() >= MAX_PARTICLES {
+                    break;
+                }
+                let angle = (k as f32) * 6.28318 / 10.0;
+                self.particles.push(Particle {
+                    x: dx,
+                    y: dy,
+                    vx: angle.cos() * 140.0,
+                    vy: angle.sin() * 140.0,
+                    life: 0.5,
+                    max_life: 0.5,
+                    color_tier: 7,
+                });
+            }
+        }
         for (x1, y1, x2, y2) in relay_shots {
             for enemy in self.enemies.iter_mut() {
                 if seg_dist(enemy.x, enemy.y, x1, y1, x2, y2) <= RELAY_BEAM_HALF_WIDTH {
@@ -1737,8 +1762,32 @@ mod tests {
             hp: 1000.0, max_hp: 1000.0, radius: 10.0, speed: 0.0,
             kind: 0, frozen_until: 0.0,
         });
-        for _ in 0..200 { u.tick(0.05); }
+        // Lone contact at 10 dps vs 100 HP: alive at 3s, gone by 11s.
+        for _ in 0..60 { u.tick(0.05); }
+        assert_eq!(u.get_relay_count(), 1);
+        for _ in 0..145 { u.tick(0.05); }
         assert_eq!(u.get_relay_count(), 0);
+        // The loss reads on the field: death sparks are fresh at ~10.25s.
+        assert!(!u.particles.is_empty());
+    }
+
+    #[test]
+    fn relay_pile_on_damage_is_capped() {
+        let mut u = Universe::new(480.0, 800.0);
+        u.gauge = 60.0;
+        assert!(u.deploy_relay(240.0));
+        let ry = u.relays[0].y;
+        for k in 0..5 {
+            u.enemies.push(Enemy {
+                id: 20 + k, x: 240.0, y: ry, vx: 0.0, vy: 0.0,
+                hp: 10000.0, max_hp: 10000.0, radius: 10.0, speed: 0.0,
+                kind: 0, frozen_until: 0.0,
+            });
+        }
+        // Uncapped, 5 x 10 dps would kill 100 HP in 2s. Capped at 20 dps
+        // the relay must still stand at 3s.
+        for _ in 0..60 { u.tick(0.05); }
+        assert_eq!(u.get_relay_count(), 1);
     }
 
 }
