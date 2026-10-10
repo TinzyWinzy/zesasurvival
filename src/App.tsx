@@ -346,7 +346,7 @@ export default function App() {
                 ownedUpgradesRef.current.add(upgrade.id);
                 const id = ++toastIdRef.current;
                 setToasts((t) => [...t.slice(-2), {
-                  id, title: `${upgrade.title} installed`, desc: upgrade.desc
+                  id, title: `${upgrade.title} installed`, desc: `${upgrade.desc} · +4 max battery`
                 }]);
                 setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 3000);
               }

@@ -90,6 +90,10 @@ const MAX_THIEVES: usize = 2;
 // Cable thief: clamps onto the battery and siphons stored charge.
 const THIEF_KIND: u8 = 5;
 const THIEF_SIPHON_DPS: f32 = 8.0;
+// Player maturity: each level hardens the battery and sharpens merge
+// damage, answering enemy HP/speed scaling with level.
+const LEVEL_HP_GAIN: f32 = 4.0;
+const MATURITY_DMG_PER_LEVEL: f32 = 0.03;
 const RELAY_RANGE: f32 = 220.0;
 const RELAY_FIRE_INTERVAL: f32 = 1.5;
 const RELAY_DAMAGE: f32 = 18.0;
@@ -550,6 +554,11 @@ impl Universe {
 
     fn wave_now(&self) -> u32 {
         ((self.run_time / self.wave_len) as u32 + 1).min(5).max(1)
+    }
+
+    /// Maturity multiplier on merge damage: +3% per level past the first.
+    fn maturity_mult(&self) -> f32 {
+        1.0 + MATURITY_DMG_PER_LEVEL * (self.level.saturating_sub(1) as f32)
     }
 
     /// Spawn mix by wave. Cable thieves appear from wave 3 and are capped —
@@ -1044,6 +1053,7 @@ impl Universe {
                             self.xp = 0;
                             self.next_xp = (self.next_xp as f32 * 1.5) as u32;
                             self.pending_choices += 1;
+                            self.player_max_hp += LEVEL_HP_GAIN;
                             self.player_hp =
                                 (self.player_hp + 20.0).min(self.player_max_hp);
                         }
@@ -1069,12 +1079,12 @@ impl Universe {
                             }
                         }
 
-                        // Area damage to nearby enemies (Surge x1.5)
+                        // Area damage to nearby enemies (Surge x1.5, maturity +3%/level)
                         let surge_mult = if self.surge_timer > 0.0 { 1.5 } else { 1.0 };
                         let burst_radius =
                             (80.0 + (next_level as f32) * 20.0) * surge_mult;
                         let damage =
-                            (30.0 + (next_level as f32) * 25.0) * surge_mult;
+                            (30.0 + (next_level as f32) * 25.0) * surge_mult * self.maturity_mult();
                         for enemy in self.enemies.iter_mut() {
                             let edx = enemy.x - mid_x;
                             let edy = enemy.y - mid_y;
@@ -1788,6 +1798,24 @@ mod tests {
         u.tick(0.05);
         assert!(u.relays[0].cooldown <= 0.0);
         assert_eq!(u.enemies[0].hp, hp_before);
+    }
+
+    #[test]
+    fn level_up_hardens_battery_and_sharpens_damage() {
+        let mut u = Universe::new(480.0, 800.0);
+        assert!((u.maturity_mult() - 1.0).abs() < 0.001);
+        let max_before = u.player_max_hp;
+        u.xp = u.next_xp - 1; // one merge away from level 2
+        u.drop_orb(100.0, 1);
+        u.drop_orb(100.0, 1);
+        u.orbs[1].x = u.orbs[0].x + 1.0;
+        u.orbs[1].y = u.orbs[0].y + 1.0;
+        u.tick(0.016);
+        assert_eq!(u.level, 2);
+        assert_eq!(u.player_max_hp, max_before + LEVEL_HP_GAIN);
+        assert!((u.maturity_mult() - 1.03).abs() < 0.001);
+        u.level = 11;
+        assert!((u.maturity_mult() - 1.3).abs() < 0.001);
     }
 
     #[test]
