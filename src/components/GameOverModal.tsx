@@ -15,6 +15,7 @@ interface GameOverModalProps {
   isNewBest: boolean;
   isNewStars: boolean;
   newBadges: BadgeId[];
+  dailyLabel?: string | null;
   onRestart: () => void;
   onMenu: () => void;
 }
@@ -27,7 +28,7 @@ function starRow(n: number) {
   return '★★★'.slice(0, n) + '☆☆☆'.slice(0, 3 - n);
 }
 
-export const GameOverModal: React.FC<GameOverModalProps> = ({ score, level, wave, seconds, victory, modeName, stars, bestScore, isNewBest, isNewStars, newBadges, onRestart, onMenu }) => {
+export const GameOverModal: React.FC<GameOverModalProps> = ({ score, level, wave, seconds, victory, modeName, stars, bestScore, isNewBest, isNewStars, newBadges, dailyLabel, onRestart, onMenu }) => {
   const [copied, setCopied] = useState(false);
   const [shareFailed, setShareFailed] = useState(false);
   const dialogRef = useDialogFocus();
@@ -36,9 +37,10 @@ export const GameOverModal: React.FC<GameOverModalProps> = ({ score, level, wave
 
   const handleShare = async () => {
     const starTxt = stars > 0 ? ` ${starRow(stars)}` : '';
+    const event = dailyLabel ? `today's ${dailyLabel} grid` : modeName;
     const text = victory
-      ? `🌅 Magetsi awuya! I held the grid until dawn in ZESA Survivor (${modeName})!${starTxt} ${fmtTime(seconds)} · Wave 5/5 · Score ${score.toLocaleString()}. Beat my grid: ${window.location.href}`
-      : `⚡ ZESA Survivor (${modeName})${starTxt}: ${fmtTime(seconds)}, Wave ${wave}/5, Level ${level}, ${score.toLocaleString()} pts! Play 100% offline: ${window.location.href}`;
+      ? `🌅 Magetsi awuya! I held ${event} in ZESA Survivor!${starTxt} ${fmtTime(seconds)} · Wave 5/5 · Score ${score.toLocaleString()}. Beat my grid: ${window.location.href}`
+      : `⚡ ZESA Survivor (${event})${starTxt}: ${fmtTime(seconds)}, Wave ${wave}/5, Level ${level}, ${score.toLocaleString()} pts! Play 100% offline: ${window.location.href}`;
     setShareFailed(false);
     try {
       if (navigator.share) {

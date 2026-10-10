@@ -25,8 +25,11 @@ interface Props {
   badges: BadgeId[];
   offlineReady: boolean;
   needRefresh: boolean;
+  dailyLabel: string;
+  dailyBest: number;
   onRefresh: () => void;
   onStart: (mode: RunMode, loadout: Loadout) => void;
+  onStartDaily: (loadout: Loadout) => void;
 }
 
 function stars(n: number) {
@@ -64,7 +67,7 @@ const SectionLabel: React.FC<{ children: React.ReactNode }> = ({ children }) => 
 
 const MODE_DURATION: Record<RunMode, string> = { 0: '3:00', 1: '5:00', 2: '∞' };
 
-export const ModeMenu: React.FC<Props> = ({ appInstall, bestStars, bestScores, runs, badges, offlineReady, needRefresh, onRefresh, onStart }) => {
+export const ModeMenu: React.FC<Props> = ({ appInstall, bestStars, bestScores, runs, badges, offlineReady, needRefresh, dailyLabel, dailyBest, onRefresh, onStart, onStartDaily }) => {
   const [mode, setMode] = useState<RunMode>(1);
   const [loadout, setLoadout] = useState<Loadout>(1);
 
@@ -98,6 +101,22 @@ export const ModeMenu: React.FC<Props> = ({ appInstall, bestStars, bestScores, r
           <p className="text-slate-400 text-[11px] tabular-nums mt-2 mb-1">
             {myBest > 0 ? `LAST BEST · ${MODES[mode].name.toUpperCase()} · ${myBest.toLocaleString()}` : 'HOLD THE GRID UNTIL DAWN'}
           </p>
+
+          {/* Daily grid: one shared seed per day, one per-day best. */}
+          <button
+            onClick={() => onStartDaily(loadout)}
+            className="w-full mt-2 mb-1 rounded-xl border border-cyan-300/40 bg-cyan-300/[0.06] hover:bg-cyan-300/[0.12] active:scale-[0.99] transition px-3 py-2.5 text-left flex items-center gap-3"
+            aria-label={`Play today's grid, ${dailyLabel}${dailyBest > 0 ? `, your best ${dailyBest.toLocaleString()}` : ''}`}
+          >
+            <span aria-hidden className="text-xl">📅</span>
+            <span className="flex-1 min-w-0">
+              <span className="block text-sm font-black text-cyan-100 tracking-wide">TODAY'S GRID · {dailyLabel.toUpperCase()}</span>
+              <span className="block text-[11px] text-cyan-200/70 tabular-nums">
+                {dailyBest > 0 ? `Your best today · ${dailyBest.toLocaleString()}` : 'Same seed all day · one best'}
+              </span>
+            </span>
+            <span aria-hidden className="text-cyan-200/60 font-black">▶</span>
+          </button>
 
 
 

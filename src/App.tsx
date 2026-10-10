@@ -28,6 +28,11 @@ import {
   checkBadges,
   loadBadges,
   starsFor,
+  dailyKey,
+  dailySeed,
+  dailyLabel,
+  loadDaily,
+  recordDaily,
   MODES,
   type BadgeId,
   type RunMode
@@ -137,6 +142,9 @@ export default function App() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [highs, setHighs] = useState(loadHighs);
+  const [dailyBest, setDailyBest] = useState(() => loadDaily()[dailyKey()] ?? 0);
+  const isDailyRef = useRef(false);
+  const dailyKeyRef = useRef(dailyKey());
   const [badges, setBadges] = useState<BadgeId[]>(loadBadges);
   const [runStars, setRunStars] = useState(0);
   const [isNewBest, setIsNewBest] = useState(false);
@@ -619,6 +627,9 @@ export default function App() {
     const before = loadHighs();
     const h = recordRun(rec);
     setHighs(h);
+    if (isDailyRef.current) {
+      setDailyBest(recordDaily(dailyKeyRef.current, finalScore));
+    }
     setRunStars(stars);
     // Records are per-mode: an Endless PB must not mask a Standard PB.
     setIsNewBest(finalScore > 0 && finalScore > before.bestScores[m]);
@@ -844,8 +855,33 @@ export default function App() {
     universeRef.current = u;
     modeRef.current = m;
     loadoutRef.current = loadout;
+    isDailyRef.current = false;
     setMode(m);
     resetRunState(m, MODES[m].total);
+    setStarted(true);
+    startedRef.current = true;
+    music.start();
+  }, []);
+
+  // Daily grid: standard rules, date-pinned spawn seed, per-day best.
+  const handleStartDaily = useCallback((loadout: Loadout) => {
+    sfx.unlock();
+    try {
+      universeRef.current?.free();
+    } catch { /* ignore */ }
+    const { width, height } = sizeRef.current;
+    const key = dailyKey();
+    const u = new Universe(width, height);
+    u.set_run_mode(1);
+    u.set_seed(BigInt(dailySeed(key)));
+    u.apply_loadout(loadout);
+    universeRef.current = u;
+    modeRef.current = 1;
+    loadoutRef.current = loadout;
+    isDailyRef.current = true;
+    dailyKeyRef.current = key;
+    setMode(1);
+    resetRunState(1, MODES[1].total);
     setStarted(true);
     startedRef.current = true;
     music.start();
@@ -859,6 +895,8 @@ export default function App() {
     const m = modeRef.current;
     const u = new Universe(width, height);
     u.set_run_mode(m);
+    // Restarting a daily grid replays the same seeded pattern.
+    if (isDailyRef.current) u.set_seed(BigInt(dailySeed(dailyKeyRef.current)));
     u.apply_loadout(loadoutRef.current);
     universeRef.current = u;
     resetRunState(m, MODES[m].total);
@@ -1066,6 +1104,7 @@ export default function App() {
             isNewBest={isNewBest}
             isNewStars={isNewStars}
             newBadges={newBadges}
+            dailyLabel={isDailyRef.current ? dailyLabel(dailyKeyRef.current) : null}
             onRestart={handleRestart}
             onMenu={handleMenu}
           />
@@ -1080,8 +1119,11 @@ export default function App() {
             badges={badges}
             offlineReady={offlineReady}
             needRefresh={needRefresh}
+            dailyLabel={dailyLabel(dailyKey())}
+            dailyBest={dailyBest}
             onRefresh={() => { void updateSWRef.current?.(true); }}
             onStart={handleStart}
+            onStartDaily={handleStartDaily}
           />
         )}
       </div>

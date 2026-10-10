@@ -65,6 +65,63 @@ export const BADGES: Badge[] = [
 
 const HIGHS_KEY = 'zesa.v1.highs';
 const BADGE_KEY = 'zesa.v1.badges';
+const DAILY_KEY = 'zesa.v1.daily';
+
+/** Local calendar day as YYYY-MM-DD — the daily grid's identity. */
+export function dailyKey(d: Date = new Date()): string {
+  const m = `${d.getMonth() + 1}`.padStart(2, '0');
+  const day = `${d.getDate()}`.padStart(2, '0');
+  return `${d.getFullYear()}-${m}-${day}`;
+}
+
+/** Human label for a daily key ("2026-10-10" → "10 Oct"). Parsed manually:
+ *  `new Date(key)` would shift across timezones. */
+export function dailyLabel(key: string): string {
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const parts = key.split('-');
+  if (parts.length !== 3) return key;
+  const m = Number(parts[1]);
+  return `${Number(parts[2])} ${months[m >= 1 && m <= 12 ? m - 1 : 0]}`;
+}
+
+/** FNV-1a hash of the date key — the day's shared spawn seed. */
+export function dailySeed(key: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < key.length; i++) {
+    h ^= key.charCodeAt(i);
+    h = Math.imul(h, 16777219);
+  }
+  return h >>> 0;
+}
+
+export function loadDaily(): Record<string, number> {
+  try {
+    const raw = localStorage.getItem(DAILY_KEY);
+    if (!raw) return {};
+    const p = JSON.parse(raw) as Record<string, unknown>;
+    const out: Record<string, number> = {};
+    for (const [k, v] of Object.entries(p)) {
+      if (typeof v === 'number' && Number.isFinite(v)) out[k] = v;
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+/** Records a daily-grid score, returns the day's best. */
+export function recordDaily(key: string, score: number): number {
+  const all = loadDaily();
+  const best = Math.max(all[key] ?? 0, score);
+  all[key] = best;
+  // Keep the log small: last 31 days.
+  const keys = Object.keys(all).sort();
+  for (const k of keys.slice(0, Math.max(0, keys.length - 31))) delete all[k];
+  try {
+    localStorage.setItem(DAILY_KEY, JSON.stringify(all));
+  } catch { /* storage full/blocked */ }
+  return best;
+}
 
 const emptyHighs = (): Highs => ({
   bestScore: 0,

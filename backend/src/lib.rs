@@ -231,6 +231,7 @@ pub struct Universe {
     pity: MercyPityEngine,
     next_id: u64,
     frame_count: u64,
+    seed: u64, // daily-grid spawn seed; 0 = unseeded variety
     game_over: bool,
     victory: bool,
     wave: u32,
@@ -307,6 +308,7 @@ impl Universe {
             pity: MercyPityEngine::new(5, 0.8),
             next_id: 1,
             frame_count: 0,
+            seed: 0,
             game_over: false,
             victory: false,
             wave: 1,
@@ -506,6 +508,12 @@ impl Universe {
         }
     }
 
+    /// Daily grid: pins the spawn pattern for a shared date seed.
+    /// Call on a fresh universe before the run starts.
+    pub fn set_seed(&mut self, seed: u64) {
+        self.seed = seed;
+    }
+
     /// Run modes: 0=blitz (180s), 1=standard (300s), 2=endless.
     /// Call on a fresh universe before the run starts.
     pub fn set_run_mode(&mut self, mode: u8) {
@@ -628,9 +636,11 @@ impl Universe {
 
     fn rand01(&mut self, salt: u64) -> f32 {
         // Cheap xorshift from frame counter — deterministic but well spread.
+        // Mixed with the run seed so a daily grid replays its spawn pattern.
         let mut v = self.frame_count.wrapping_mul(6364136223846793005)
             ^ (salt.wrapping_mul(1442695040888963407))
-            ^ self.next_id;
+            ^ self.next_id
+            ^ self.seed;
         v ^= v >> 29;
         v = v.wrapping_mul(0xBF58476D1CE4E5B9);
         v ^= v >> 32;
@@ -1798,6 +1808,23 @@ mod tests {
         u.tick(0.05);
         assert!(u.relays[0].cooldown <= 0.0);
         assert_eq!(u.enemies[0].hp, hp_before);
+    }
+
+    #[test]
+    fn daily_seed_pins_spawn_pattern() {
+        let mut a = Universe::new(480.0, 800.0);
+        let mut b = Universe::new(480.0, 800.0);
+        a.set_seed(12345);
+        b.set_seed(12345);
+        for salt in [7u64, 29, 101] {
+            assert_eq!(a.rand01(salt), b.rand01(salt));
+        }
+        let mut c = Universe::new(480.0, 800.0);
+        c.set_seed(99999);
+        assert_ne!(a.rand01(7), c.rand01(7));
+        // Unseeded runs keep the legacy variety (seed 0 changes nothing).
+        let mut d = Universe::new(480.0, 800.0);
+        assert_ne!(a.rand01(7), d.rand01(7));
     }
 
     #[test]
