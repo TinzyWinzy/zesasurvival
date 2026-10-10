@@ -80,8 +80,8 @@ export const ModeMenu: React.FC<Props> = ({ appInstall, bestStars, bestScores, r
       <div className="menu-board absolute inset-0" aria-hidden />
       <div className="menu-grid absolute inset-0" aria-hidden />
 
-      <div className="menu-scroll relative h-full overflow-y-auto">
-        <div className="menu-content w-full max-w-sm mx-auto px-4 pt-4 pb-28">
+      <div className="menu-scroll">
+        <div className="menu-content w-full max-w-sm mx-auto px-4 pb-28 pt-[max(1rem,env(safe-area-inset-top))]">
 
           {/* Header: utility-board identity */}
           <div className="flex items-center gap-2 mb-1">
@@ -217,8 +217,8 @@ export const ModeMenu: React.FC<Props> = ({ appInstall, bestStars, bestScores, r
         </div>
       </div>
 
-      {/* Breaker-switch CTA: pinned in thumb reach */}
-      <div className="absolute bottom-0 inset-x-0 z-10 border-t border-slate-800/80 bg-slate-950/92 backdrop-blur px-4 pt-2.5 pb-3">
+      {/* Breaker-switch CTA: pinned in thumb reach, clear of the gesture bar */}
+      <div className="absolute bottom-0 inset-x-0 z-10 border-t border-slate-800/80 bg-slate-950/92 backdrop-blur px-4 pt-2.5 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
         <div className="max-w-sm mx-auto">
           <button
             onClick={() => onStart(mode, loadout)}
