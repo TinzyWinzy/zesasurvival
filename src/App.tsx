@@ -921,19 +921,19 @@ export default function App() {
   return (
     <div className="game-shell bg-slate-950 select-none">
       <div ref={containerRef} className="game-frame relative overflow-hidden bg-slate-950 shadow-2xl">
-        {/* Night-to-dawn sky: single layer swapped on wave change (the
-            banner + flash + stinger mask the cut; 5 crossfading fullscreen
-            layers janked low-end GPUs). */}
+        {/* Night-to-dawn sky: layer cut on wave change (the banner +
+            flash + stinger mask the cut; crossfading fullscreen layers
+            janked low-end GPUs, so this stays a hard swap). */}
         <div
           aria-hidden
           className="absolute inset-0 pointer-events-none"
-          style={{ background: BG_LAYERS[0] }}
+          style={{ background: BG_LAYERS[Math.min(Math.max(wave, 1), 5) - 1] }}
         />
         <div
           aria-hidden
           className="absolute inset-0 pointer-events-none"
           style={{
-            background: 'linear-gradient(to bottom, rgba(55,48,107,0.25), rgba(124,45,18,0.4) 65%, rgba(251,191,36,0.5))',
+            background: 'linear-gradient(to bottom, rgba(55,48,107,0.35), rgba(124,45,18,0.55) 65%, rgba(251,191,36,0.7))',
             opacity: dawnProgress,
             transition: 'opacity 1s linear'
           }}

@@ -221,14 +221,16 @@ export class Music {
         ? { drone: 0.14, bass: 0, arp: 0, hats: 0, lead: 0.55, danger: 0 }
         : this.phase === 'over'
           ? { drone: 0.1, bass: 0, arp: 0, hats: 0, lead: 0, danger: 0 }
-          : {
-              drone: 0.07 + 0.06 * t,
-              bass: 0.8,
-              arp: smoothstep(0.18, 0.45, t) * 0.9,
-              hats: smoothstep(0.42, 0.68, t) * 0.8,
-              lead: smoothstep(0.62, 0.88, t) * 0.9,
-              danger: this.danger * 0.9
-            };
+            : {
+                drone: 0.07 + 0.06 * t,
+                // The dominant voice must move or the bed feels static:
+                // bass swells with tension instead of sitting at full.
+                bass: 0.45 + 0.45 * t,
+                arp: smoothstep(0.18, 0.45, t) * 0.9,
+                hats: smoothstep(0.42, 0.68, t) * 0.8,
+                lead: smoothstep(0.62, 0.88, t) * 0.9,
+                danger: this.danger * 0.9
+              };
     for (const name of LAYERS) {
       L[name].gain.setTargetAtTime(g[name] * mul, now, tau);
     }
@@ -265,7 +267,8 @@ export class Music {
       const root = hz(ROOTS[bar]);
       // Bass pulse, always on.
       if (s % 4 === 0) this.note(root, this.nextT, step * 3, 'square', 0.22, 'bass');
-      // Arp: off-beat 16ths, octave up once the wave turns.
+      // Arp: off-beat 16ths, octave up once the wave turns. Voiced hot
+      // enough to carry on phone speakers, where the tension must read.
       if (s % 2 === 1) {
         const oct = this.wave >= 4 ? 2 : 1;
         this.note(
@@ -273,15 +276,15 @@ export class Music {
           this.nextT,
           step * 1.5,
           'triangle',
-          0.14,
+          0.2,
           'arp'
         );
       }
       if (s % 2 === 0) this.note(hz(6200), this.nextT, 0.03, 'sine', 0.06, 'hats');
-      // Lead: one long note per bar.
+      // Lead: one long note per bar, voiced to survive small speakers.
       if (s === 0) {
         const set = this.wave >= 5 ? LEAD_DREAD : LEAD;
-        this.note(hz(set[bar]), this.nextT, step * 8, 'sawtooth', 0.1, 'lead');
+        this.note(hz(set[bar]), this.nextT, step * 8, 'sawtooth', 0.16, 'lead');
       }
       // Danger heartbeat: a lub-dub that quickens as the bed speeds up.
       // The layer gain already scales with danger, so notes stay fixed.
