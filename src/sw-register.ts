@@ -1,13 +1,14 @@
 import { registerSW } from 'virtual:pwa-register';
 
-export function setupServiceWorker(onNeedRefresh: () => void) {
+export function setupServiceWorker(onNeedRefresh: () => void, onOfflineReady: () => void) {
+  if ('serviceWorker' in navigator && navigator.serviceWorker.controller) onOfflineReady();
   const updateSW = registerSW({
     immediate: false,
     onNeedRefresh() {
       onNeedRefresh();
     },
     onOfflineReady() {
-      console.log('ZESA Survivor ready for offline play.');
+      onOfflineReady();
     },
     onRegisterError(err: unknown) {
       console.error('Service worker registration failed:', err);

@@ -3,6 +3,8 @@ import init, { Universe } from '../pkg/zesa_backend.js';
 import { HUD } from './components/HUD';
 import { GameOverModal } from './components/GameOverModal';
 import { ModeMenu, type Loadout } from './components/ModeMenu';
+import { generateUpgradeChoices } from './components/UpgradeModal';
+import { useDialogFocus } from './components/useDialogFocus';
 import { setupServiceWorker } from './sw-register';
 import { sfx } from './audio/sound';
 import { music } from './audio/music';
@@ -14,7 +16,9 @@ import {
   drawBeam,
   drawTelegraph,
   drawEnergy,
-  drawArcTick
+  drawArcTick,
+  drawMergePulse,
+  drawArena
 } from './game/sprites';
 import {
   loadHighs,
@@ -30,7 +34,7 @@ import {
 const MAX_WIDTH = 480;
 const HUD_SYNC_MS = 250;
 const DROP_COOLDOWN_MS = 250;
-const HEADER_LEN = 26;
+const HEADER_LEN = 33;
 
 const WAVE_BANNERS: Record<number, { title: string; desc: string }> = {
   2: { title: 'WAVE 2 — Escalation', desc: 'Fast strikers from the edges' },
@@ -39,7 +43,7 @@ const WAVE_BANNERS: Record<number, { title: string; desc: string }> = {
   5: { title: 'FINAL WAVE — Hold Until Dawn', desc: 'Overlord incoming. Survive!' }
 };
 
-// Night-to-dawn sky: one layer per wave, crossfaded. Canvas is
+// Night-to-dawn sky: the warm overlay follows elapsed survival time. Canvas is
 // transparent (clearRect), so the sky shows through gameplay.
 const BG_LAYERS: string[] = [
   'linear-gradient(to bottom, #020617 0%, #0b1120 60%, #0f172a 100%)',
@@ -59,18 +63,6 @@ function randomOrb(): number {
   return Math.floor(Math.random() * 3) + 1;
 }
 
-// Universe law — transformer tiers auto-install the next coil in rotation.
-// No draft, no pause: Shield (L2,5,8…) → Surge (L3,6,9…) → Freeze (L4,7,10…).
-function bonusForLevel(level: number): 1 | 2 | 3 {
-  return ((((level - 2) % 3) + 3) % 3 + 1) as 1 | 2 | 3;
-}
-
-const BONUS_META: Record<number, { title: string; desc: string }> = {
-  1: { title: 'Solar Shield installed', desc: '+30 max battery, healed 30' },
-  2: { title: 'Surge Burst online', desc: '+50% blast for 20s' },
-  3: { title: 'Freeze Schedule active', desc: 'Faults slowed for 12s' }
-};
-
 interface Toast {
   id: number;
   title: string;
@@ -84,12 +76,12 @@ export default function App() {
   const wasmMemoryRef = useRef<WebAssembly.Memory | null>(null);
   const lastDropRef = useRef(0);
   const sizeRef = useRef(gameSize());
-  const pausedRef = useRef(false); // reserved: only tab-hidden pauses physics now
+  const pausedRef = useRef(false);
+  const ownedUpgradesRef = useRef(new Set<number>());
   const toastIdRef = useRef(0);
   const runStartRef = useRef(performance.now());
   const mergesRef = useRef(0);
   const maxComboRef = useRef(0);
-  const lastLevelRef = useRef(1);
   const waveRef = useRef(1);
   const startedRef = useRef(false);
   const modeRef = useRef<RunMode>(1);
@@ -100,8 +92,10 @@ export default function App() {
   const pausedMsRef = useRef(0);
   const aimRef = useRef({ active: false, x: 0, level: 1, charged: false });
   const fpsEmaRef = useRef(60);
-  const lastPerfSyncRef = useRef(0);
   const gameOverSavedRef = useRef(false);
+  const accumulatorRef = useRef(0);
+  const mergeEffectsRef = useRef<Array<{x: number; y: number; tier: number; combo: number; start: number}>>([]);
+  const beamLivesRef = useRef(new Map<string, number>());
 
   const [score, setScore] = useState(0);
   const [level, setLevel] = useState(1);
@@ -124,10 +118,12 @@ export default function App() {
   const [timeLeft, setTimeLeft] = useState(300);
   const [runSeconds, setRunSeconds] = useState(0);
   const [gauge, setGauge] = useState(0);
+  const pauseDialogRef = useDialogFocus(paused && started && !gameOver);
   const [isOffline, setIsOffline] = useState(
     typeof navigator !== 'undefined' ? !navigator.onLine : false
   );
   const [needRefresh, setNeedRefresh] = useState(false);
+  const [offlineReady, setOfflineReady] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [highs, setHighs] = useState(loadHighs);
@@ -139,7 +135,7 @@ export default function App() {
   const updateSWRef = useRef<((reload?: boolean) => Promise<void>) | null>(null);
 
   useEffect(() => {
-    const updateSW = setupServiceWorker(() => setNeedRefresh(true));
+    const updateSW = setupServiceWorker(() => setNeedRefresh(true), () => setOfflineReady(true));
     updateSWRef.current = updateSW;
 
     const handleOnline = () => setIsOffline(false);
@@ -159,6 +155,7 @@ export default function App() {
     let lastTime = performance.now();
     let hidden = document.hidden;
     let hiddenSince = 0;
+    const motionQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
 
     const handleVis = () => {
       hidden = document.hidden;
@@ -176,6 +173,7 @@ export default function App() {
 
     const handleResize = () => {
       sizeRef.current = gameSize();
+      universeRef.current?.resize(sizeRef.current.width, sizeRef.current.height);
       const canvas = canvasRef.current;
       if (canvas) {
         const dpr = Math.min(window.devicePixelRatio || 1, 2);
@@ -205,10 +203,10 @@ export default function App() {
 
         const render = (time: number) => {
           if (cancelled) return;
-          const rawDt = Math.min((time - lastTime) / 1000, 0.05);
+          const rawDt = Math.min((time - lastTime) / 1000, 0.2); // cap at 200ms
           lastTime = time;
 
-          // FPS EMA for adaptive difficulty
+          // FPS EMA changes particle rendering only, never game difficulty.
           if (rawDt > 0) {
             const fps = 1 / Math.max(rawDt, 1e-4);
             fpsEmaRef.current = fpsEmaRef.current * 0.95 + fps * 0.05;
@@ -224,17 +222,19 @@ export default function App() {
             pausedMsRef.current += rawDt * 1000;
           }
 
-          if (universe && canvas && mem && !paused && !universe.is_game_over() && !universe.is_victory()) {
-            universe.tick(rawDt);
+          // Fixed-timestep physics with accumulator
+          const PHYSICS_DT = 1 / 60; // 60 Hz fixed step
+          const MAX_ACCUMULATOR = PHYSICS_DT * 10; // max 10 steps per frame
 
-            // Adaptive perf sync every 2s
-            if (time - lastPerfSyncRef.current > 2000) {
-              lastPerfSyncRef.current = time;
-              const fps = fpsEmaRef.current;
-              const lvl = universe.get_level();
-              if (fps < 28) universe.set_perf_mode(0);
-              else if (fps > 50 && lvl >= 4) universe.set_perf_mode(2);
-              else universe.set_perf_mode(1);
+          if (universe && canvas && mem && !paused && !universe.is_game_over() && !universe.is_victory()) {
+            // Accumulate time
+            accumulatorRef.current += rawDt;
+            accumulatorRef.current = Math.min(accumulatorRef.current, MAX_ACCUMULATOR);
+
+            // Step physics at fixed rate
+            while (accumulatorRef.current >= PHYSICS_DT) {
+              universe.tick(PHYSICS_DT);
+              accumulatorRef.current -= PHYSICS_DT;
             }
 
             const ptr = universe.get_render_data() >>> 0;
@@ -256,7 +256,7 @@ export default function App() {
             const pcombo = copy[11] | 0;
             const pcomboFrac = copy[12];
             const pbest = copy[13] | 0;
-            // copy[14] = pending_choices (auto-consumed, kept at 0 by passive track)
+            const pendingChoices = copy[14] | 0;
             const psurge = copy[15];
             const pfreeze = copy[16];
             const pwave = copy[17] | 0;
@@ -264,10 +264,10 @@ export default function App() {
             const pvictory = copy[19] > 0.5;
             const telegraphCount = copy[20] | 0;
             const pmerges = copy[21] | 0;
-            const pgauge = copy[22];
-            const beamCount = copy[23] | 0;
-            const energyCount = copy[24] | 0;
-            // copy[25] = last_merge_tier (retired with hit-stop/shake)
+            // Index 22 is the last merge tier.
+            const pgauge = copy[23];
+            const beamCount = copy[24] | 0;
+            const energyCount = copy[25] | 0;
 
             maxComboRef.current = Math.max(maxComboRef.current, pbest);
             // Clean merge feedback: sound only. Pop + glyph carry the visual.
@@ -294,25 +294,23 @@ export default function App() {
               setVictory(true);
               setGameOver(true);
             }
-            // Passive transformer track: auto-install bonus per new tier, toast only.
-            if (plevel > lastLevelRef.current) {
+            // Consume every earned upgrade without interrupting input or physics.
+            if (pendingChoices > 0 && !pvictory && !universe.is_game_over()) {
               sfx.level();
-              for (let lv = lastLevelRef.current + 1; lv <= plevel; lv++) {
-                const bonus = bonusForLevel(lv);
-                try {
-                  universe.apply_powerup(bonus);
-                } catch { /* engine not ready */ }
-                const meta = BONUS_META[bonus];
+              for (let i = 0; i < pendingChoices; i++) {
+                const upgrade = generateUpgradeChoices(ownedUpgradesRef.current)[0];
+                universe.apply_powerup(upgrade.id);
+                ownedUpgradesRef.current.add(upgrade.id);
                 const id = ++toastIdRef.current;
-                setToasts((t) => [...t.slice(-2), { id, title: `Lv ${lv} — ${meta.title}`, desc: meta.desc }]);
-                setTimeout(() => {
-                  setToasts((t) => t.filter((x) => x.id !== id));
-                }, 2600);
+                setToasts((t) => [...t.slice(-2), {
+                  id, title: `${upgrade.title} installed`, desc: upgrade.desc
+                }]);
+                setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 3000);
               }
-              lastLevelRef.current = plevel;
+              setLevel(plevel);
             }
 
-            if (time - lastHudSync > HUD_SYNC_MS) {
+            if (time - lastHudSync > HUD_SYNC_MS || pvictory || universe.is_game_over()) {
               lastHudSync = time;
               if (pgauge > prevGaugeRef.current + 1) sfx.pickup();
               if (php < prevHpRef.current - 3) sfx.hurt();
@@ -331,7 +329,7 @@ export default function App() {
               setWave(pwave);
               if (modeRef.current === 2) {
                 // Endless: engine time_left is unbounded — count up instead.
-                const elapsed = (time - runStartRef.current - pausedMsRef.current) / 1000;
+                const elapsed = universe.get_run_time();
                 setTimeLeft(elapsed);
                 setRunSeconds(Math.round(elapsed));
               } else {
@@ -350,12 +348,9 @@ export default function App() {
               ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
               ctx.clearRect(0, 0, w, h);
 
-              ctx.strokeStyle = 'rgba(0,240,255,0.14)';
-              ctx.lineWidth = 2;
-              ctx.beginPath();
-              ctx.moveTo(0, h - 100);
-              ctx.lineTo(w, h - 100);
-              ctx.stroke();
+              const visualTime = motionQuery.matches ? 0 : time;
+              const dawn = modeRef.current === 2 ? Math.min(1, universe.get_run_time() / 300) : 1 - ptimeLeft / MODES[modeRef.current].total;
+              drawArena(ctx, w, h, dawn);
 
               let idx = HEADER_LEN;
 
@@ -367,7 +362,7 @@ export default function App() {
                 const olevel = copy[idx + 2];
                 const oradius = copy[idx + 3];
                 idx += 4;
-                drawOrb(ctx, ox, oy, oradius, olevel, time);
+                drawOrb(ctx, ox, oy, oradius, olevel, visualTime);
                 if (olevel >= 7 && hi.length < 12) hi.push({ x: ox, y: oy });
               }
               // Arcs jump between close T7+ neighbors (cap 8 strokes).
@@ -389,7 +384,7 @@ export default function App() {
                 const ehp = copy[idx + 2];
                 const ekind = copy[idx + 3] | 0;
                 idx += 4;
-                drawEnemy(ctx, ekind, ex, ey, time);
+                drawEnemy(ctx, ekind, ex, ey, visualTime);
                 const er = ekind === 2 ? 16 : ekind === 4 ? 26 : ekind === 3 ? 14 : ekind === 1 ? 8 : 10;
                 ctx.fillStyle = 'rgba(255,255,255,0.75)';
                 ctx.fillRect(ex - er, ey - er - 7, er * 2 * Math.max(0, Math.min(1, ehp)), 3);
@@ -400,6 +395,7 @@ export default function App() {
                 const pty = copy[idx + 1];
                 const ptLife = copy[idx + 2];
                 idx += 4; // tier tint skipped: sparks render hot white-amber
+                if (fpsEmaRef.current < 28 && i % 3 !== 0) continue;
                 ctx.beginPath();
                 ctx.arc(ptx, pty, Math.max(0.5, 4 * ptLife), 0, Math.PI * 2);
                 ctx.fillStyle = '#FFE9A8';
@@ -412,24 +408,36 @@ export default function App() {
                 const ty = copy[idx + 1];
                 const tfrac = copy[idx + 2];
                 idx += 3;
-                drawTelegraph(ctx, tx, ty, tfrac, time);
+                drawTelegraph(ctx, tx, ty, tfrac, visualTime);
               }
 
               // P2: discharge beams (merge → battery), then harvestable energy.
+              const frameBeams = new Map<string, number>();
               for (let i = 0; i < beamCount; i++) {
                 const bx1 = copy[idx];
                 const by1 = copy[idx + 1];
                 const bx2 = copy[idx + 2];
                 const by2 = copy[idx + 3];
+                const beamLife = copy[idx + 4];
                 idx += 5;
-                drawBeam(ctx, bx1, by1, bx2, by2);
+                const key = `${bx1.toFixed(1)}:${by1.toFixed(1)}`;
+                if (!frameBeams.has(key) && beamLife > (beamLivesRef.current.get(key) ?? 0) + 0.05) {
+                  mergeEffectsRef.current.push({x: bx1, y: by1, tier: copy[22], combo: pcombo, start: time});
+                }
+                frameBeams.set(key, beamLife);
+                drawBeam(ctx, bx1, by1, bx2, by2, beamLife);
+              }
+              beamLivesRef.current = frameBeams;
+              mergeEffectsRef.current = mergeEffectsRef.current.filter((effect) => time - effect.start < 650).slice(-12);
+              for (const effect of mergeEffectsRef.current) {
+                drawMergePulse(ctx, effect.x, effect.y, effect.tier, effect.combo, (time - effect.start) / 650, motionQuery.matches);
               }
 
               for (let i = 0; i < energyCount; i++) {
                 const gex = copy[idx];
                 const gey = copy[idx + 1];
                 idx += 2;
-                drawEnergy(ctx, gex, gey, i * 1.7, time);
+                drawEnergy(ctx, gex, gey, i * 1.7, visualTime);
               }
 
               // Aim preview: ghost lane for touch players (hold, aim, release).
@@ -457,9 +465,9 @@ export default function App() {
                 ctx.stroke();
               }
 
-              drawPlayer(ctx, px, py, php / Math.max(1, pmaxhp), time);
+              drawPlayer(ctx, px, py, php / Math.max(1, pmaxhp), visualTime);
             }
-          } else if (universe?.is_game_over()) {
+          } else if (startedRef.current && universe?.is_game_over()) {
             setGameOver((g) => (g ? g : true));
           }
 
@@ -499,17 +507,22 @@ export default function App() {
     music.stop();
     const u = universeRef.current;
     const merges = u ? u.get_merge_count() : mergesRef.current;
-    const finalWave = waveRef.current;
+    const finalWave = u?.get_wave() ?? waveRef.current;
     const m = modeRef.current;
     const total = MODES[m].total;
-    const elapsed = Math.round((performance.now() - runStartRef.current - pausedMsRef.current) / 1000);
+    const elapsed = Math.round(u?.get_run_time() ?? 0);
     const seconds = m === 2 ? elapsed : Math.min(total, elapsed);
-    const won = victory;
-    const stars = starsFor(m, score);
+    const won = u?.is_victory() ?? victory;
+    const finalScore = u?.get_score() ?? score;
+    const finalLevel = u?.get_level() ?? level;
+    const stars = starsFor(m, finalScore);
+    setScore(finalScore);
+    setLevel(finalLevel);
+    setRunSeconds(seconds);
     mergesRef.current = merges;
     const rec = {
-      score,
-      level,
+      score: finalScore,
+      level: finalLevel,
       combo: maxComboRef.current,
       merges,
       seconds,
@@ -522,14 +535,14 @@ export default function App() {
     const before = loadHighs();
     const h = recordRun(rec);
     setHighs(h);
-    setBadges(loadBadges());
     setRunStars(stars);
     // Records are per-mode: an Endless PB must not mask a Standard PB.
-    setIsNewBest(score > 0 && score > before.bestScores[m]);
+    setIsNewBest(finalScore > 0 && finalScore > before.bestScores[m]);
     setIsNewStars(stars > before.bestStars[m]);
     setNewBadges(
-      checkBadges({ merges, combo: maxComboRef.current, score, level, seconds, victory: won })
+      checkBadges({ merges, combo: maxComboRef.current, score: finalScore, level: finalLevel, seconds, victory: won })
     );
+    setBadges(loadBadges());
     if (won) sfx.victory(); else sfx.over();
   }, [gameOver, victory, score, level]);
 
@@ -542,7 +555,7 @@ export default function App() {
       gameOverSavedRef.current = true;
       const m = modeRef.current;
       const total = MODES[m].total;
-      const elapsed = Math.round((performance.now() - runStartRef.current - pausedMsRef.current) / 1000);
+      const elapsed = Math.round(u.get_run_time());
       const scoreNow = u.get_score();
       recordRun({
         score: scoreNow,
@@ -576,31 +589,34 @@ export default function App() {
     const canvas = canvasRef.current;
     if (!canvas) return 0;
     const rect = canvas.getBoundingClientRect();
-    return clientX - rect.left;
+    return (clientX - rect.left) * sizeRef.current.width / rect.width;
   };
 
   const commitDrop = (x: number) => {
     const u = universeRef.current;
-    if (!u) return;
+    if (!u || !startedRef.current || pausedRef.current || u.is_game_over() || u.is_victory()) return;
     const now = performance.now();
     if (now - lastDropRef.current < DROP_COOLDOWN_MS) return;
     lastDropRef.current = now;
     // P2: full gauge → charged L4 drop.
-    if (gauge >= 100) {
+    if (u.get_gauge() >= 100) {
       if (u.drop_charged(x)) {
         sfx.charged();
         setGauge(0);
         return;
       }
     }
-    u.drop_orb(x, nextOrb);
-    sfx.drop();
-    setNextOrb(randomOrb());
+    if (u.drop_orb(x, nextOrb)) {
+      sfx.drop();
+      setNextOrb(randomOrb());
+    }
   };
 
   const handlePointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
     const u = universeRef.current;
-    if (!u || gameOver || paused || loading || loadError) return;
+    if (!u || !startedRef.current || gameOver || pausedRef.current || loading || loadError) return;
+    e.currentTarget.focus();
+    e.currentTarget.setPointerCapture(e.pointerId);
     sfx.unlock();
     const x = canvasX(e.clientX);
     if (!Number.isFinite(x)) return;
@@ -614,8 +630,7 @@ export default function App() {
 
   const handlePointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
     const u = universeRef.current;
-    if (!u || gameOver || paused) return;
-    if (e.buttons === 0 && e.pointerType === 'mouse') return;
+    if (!u || !startedRef.current || gameOver || pausedRef.current) return;
     const x = canvasX(e.clientX);
     if (!Number.isFinite(x)) return;
     u.move_player(x);
@@ -626,7 +641,7 @@ export default function App() {
     if (!aimRef.current.active) return;
     const x = canvasX(e.clientX);
     aimRef.current.active = false;
-    if (gameOver || paused || loading || loadError) return;
+    if (gameOver || pausedRef.current || loading || loadError) return;
     if (!Number.isFinite(x)) return;
     commitDrop(x);
   };
@@ -655,7 +670,6 @@ export default function App() {
     runStartRef.current = performance.now();
     mergesRef.current = 0;
     maxComboRef.current = 0;
-    lastLevelRef.current = 1;
     waveRef.current = 1;
     prevMergesRef.current = 0;
     prevGaugeRef.current = 0;
@@ -663,6 +677,10 @@ export default function App() {
     pausedMsRef.current = 0;
     aimRef.current = { active: false, x: 0, level: 1, charged: false };
     pausedRef.current = false;
+    ownedUpgradesRef.current.clear();
+    accumulatorRef.current = 0;
+    mergeEffectsRef.current = [];
+    beamLivesRef.current.clear();
     gameOverSavedRef.current = false;
     setPaused(false);
     setGameOver(false);
@@ -747,14 +765,15 @@ export default function App() {
         <div
           aria-hidden
           className="absolute inset-0 pointer-events-none"
-          style={{ background: BG_LAYERS[(victory ? 5 : wave) - 1] }}
+          style={{ background: BG_LAYERS[0] }}
         />
         <div
           aria-hidden
           className="absolute inset-0 pointer-events-none"
           style={{
-            background: 'radial-gradient(ellipse 90% 42% at 50% 108%, rgba(251,191,36,0.85), transparent 70%)',
-            opacity: dawnProgress * 0.8
+            background: 'linear-gradient(to bottom, rgba(55,48,107,0.25), rgba(124,45,18,0.4) 65%, rgba(251,191,36,0.5))',
+            opacity: dawnProgress,
+            transition: 'opacity 1s linear'
           }}
         />
         <HUD
@@ -775,7 +794,7 @@ export default function App() {
           gauge={gauge}
           endless={mode === 2}
           isOffline={isOffline}
-          needRefresh={needRefresh}
+          needRefresh={false}
           onRefreshPWA={() => updateSWRef.current?.(true)}
         />
 
@@ -805,17 +824,28 @@ export default function App() {
 
         <canvas
           ref={canvasRef}
-          style={{ width: sizeRef.current.width, height: sizeRef.current.height }}
+          tabIndex={started && !paused && !gameOver ? 0 : -1}
+          aria-label="Game arena. Move with left and right arrows; drop a cell with Space."
+          onKeyDown={(e) => {
+            const u = universeRef.current;
+            if (!u || pausedRef.current || !startedRef.current || gameOver) return;
+            if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+              e.preventDefault();
+              u.move_player(u.get_player_x() + (e.key === 'ArrowLeft' ? -70 : 70));
+            } else if (e.key === ' ') {
+              e.preventDefault();
+              commitDrop(u.get_player_x());
+            } else if (e.key === 'Escape') togglePause();
+          }}
           onPointerDown={handlePointerDown}
           onPointerMove={handlePointerMove}
           onPointerUp={handlePointerUp}
           onPointerCancel={handlePointerCancel}
-          onPointerLeave={handlePointerUp}
           className="relative w-full h-full touch-none cursor-pointer"
         />
 
         {/* CRT scanlines over gameplay, under UI */}
-        <div aria-hidden className="scanlines absolute inset-0 z-[5] pointer-events-none opacity-60" />
+        <div aria-hidden className="scanlines absolute inset-0 z-[5] pointer-events-none opacity-20" />
 
         {/* Pause + mute controls */}
         {started && !gameOver && !loading && !loadError && (
@@ -838,7 +868,7 @@ export default function App() {
         )}
 
         {paused && started && !gameOver && (
-          <div className="absolute inset-0 z-40 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-6" role="dialog" aria-modal="true" aria-label="Paused">
+          <div ref={pauseDialogRef} className="absolute inset-0 overflow-y-auto z-40 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-6" role="dialog" aria-modal="true" aria-label="Paused">
             <div className="text-center">
               <div className="text-4xl mb-2" aria-hidden>⏸️</div>
               <h2 className="text-xl font-black text-white mb-1">LOAD SHEDDING PAUSE</h2>
@@ -851,26 +881,26 @@ export default function App() {
                   Restart
                 </button>
                 <button onClick={handleMenu} className="bg-transparent border border-slate-600 text-slate-300 font-bold py-2.5 rounded-xl text-sm">
-                  Change track
+                  Modes & loadout
                 </button>
               </div>
             </div>
           </div>
         )}
 
-        {/* Passive upgrade toasts — non-blocking, game never pauses */}
+        {/* Non-blocking wave and upgrade announcements */}
         {toasts.length > 0 && (
-          <div className="absolute top-24 left-0 w-full flex flex-col items-center gap-1.5 z-30 pointer-events-none px-4">
-            {toasts.map((t) => (
-              <div key={t.id} className="bg-amber-500/95 text-slate-950 px-3 py-1.5 rounded-full shadow-xl text-center">
+          <div className="absolute top-36 left-0 w-full flex flex-col items-center gap-1.5 z-30 pointer-events-none px-4">
+            {toasts.slice(-1).map((t) => (
+              <div key={t.id} className="bg-slate-950/90 text-amber-200 border border-amber-300/25 px-3 py-1.5 rounded-lg text-center">
                 <div className="text-xs font-black">{t.title}</div>
-                <div className="text-[11px] font-semibold">{t.desc}</div>
+                <div className="text-[11px] text-slate-300">{t.desc}</div>
               </div>
             ))}
           </div>
         )}
 
-        {gameOver && (
+        {started && gameOver && (
           <GameOverModal
             score={score}
             level={level}
@@ -894,6 +924,9 @@ export default function App() {
             bestScores={highs.bestScores}
             runs={highs.runs}
             badges={badges}
+            offlineReady={offlineReady}
+            needRefresh={needRefresh}
+            onRefresh={() => { void updateSWRef.current?.(true); }}
             onStart={handleStart}
           />
         )}

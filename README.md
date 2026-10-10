@@ -41,13 +41,13 @@ cargo test --manifest-path backend/Cargo.toml
 
 ## Architecture notes
 
-- **WASM ABI**: render buffer header is 26 floats (append-only, indices 0–16
+- **WASM ABI**: render buffer header is 33 floats (append-only, indices 0–16
   stable). Defined in `backend/src/lib.rs` and mirrored in `HEADER_LEN` in
   `src/App.tsx`. Change both together.
 - **`wasm-bindgen` is pinned to `0.2.92`** in both `backend/Cargo.toml` and the
   CI workflow. Bumping it requires rebuilding `pkg/` locally.
-- **No mid-run upgrade modal.** Upgrades are a passive rotation so the game
-  never pauses (mobile / one-hand play).
+- **Continuous level-ups.** Each earned upgrade installs automatically, with a
+  brief non-blocking notification. Gameplay and input continue without a pause.
 
 ## Deploy
 

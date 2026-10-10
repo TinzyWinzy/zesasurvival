@@ -38,6 +38,7 @@ pub struct Enemy {
     pub radius: f32,
     pub speed: f32,
     pub kind: u8, // 0=grunt, 1=striker, 2=tank, 3=elite, 4=overlord
+    pub frozen_until: f32,
 }
 
 #[derive(Clone, Debug)]
@@ -150,6 +151,7 @@ pub struct Universe {
     width: f32,
     height: f32,
     player_x: f32,
+    player_target_x: f32,
     player_y: f32,
     player_hp: f32,
     player_max_hp: f32,
@@ -168,6 +170,15 @@ pub struct Universe {
     freeze_timer: f32,
     pending_choices: u32,
     run_time: f32,
+    // Upgrade effects (persist for run)
+    beam_width_mult: f32,
+    multi_shot_chance: f32,
+    cryo_nova: bool,
+    chain_lightning: bool,
+    plasma_shield: bool,
+    plasma_shield_regen: f32,
+    overclock_speed: f32,
+    magnet_radius_mult: f32,
     // run modes: 0=blitz 3min, 1=standard 5min, 2=endless
     mode: u8,
     total_time: f32,
@@ -218,7 +229,8 @@ impl Universe {
             width: w,
             height: h,
             player_x: w * 0.5,
-            player_y: h * 0.85,
+            player_target_x: w * 0.5,
+            player_y: h - 72.0,
             player_hp: 100.0,
             player_max_hp: 100.0,
             invuln_timer: 0.0,
@@ -235,6 +247,15 @@ impl Universe {
             freeze_timer: 0.0,
             pending_choices: 0,
             run_time: 0.0,
+            // Upgrade effects (persist for run)
+            beam_width_mult: 1.0,
+            multi_shot_chance: 0.0,
+            cryo_nova: false,
+            chain_lightning: false,
+            plasma_shield: false,
+            plasma_shield_regen: 0.0,
+            overclock_speed: 1.0,
+            magnet_radius_mult: 1.0,
             mode: 1,
             total_time: WIN_TIME,
             wave_len: 60.0,
@@ -260,9 +281,9 @@ impl Universe {
         }
     }
 
-    pub fn drop_orb(&mut self, x: f32, level: u8) {
-        if self.game_over || self.orbs.len() >= MAX_ORBS {
-            return;
+    pub fn drop_orb(&mut self, x: f32, level: u8) -> bool {
+        if self.game_over || self.victory || self.orbs.len() >= MAX_ORBS {
+            return false;
         }
         let x = if x.is_finite() { x } else { self.width * 0.5 };
         let level = level.clamp(1, 3);
@@ -281,6 +302,7 @@ impl Universe {
         };
         self.next_id += 1;
         self.orbs.push(orb);
+        true
     }
 
     /// Charged drop: spends a full gauge (100) to deploy a level-4 cell.
@@ -312,15 +334,40 @@ impl Universe {
         self.gauge
     }
 
+    pub fn get_player_x(&self) -> f32 { self.player_x }
+
+    pub fn resize(&mut self, width: f32, height: f32) {
+        if !width.is_finite() || !height.is_finite() { return; }
+        let width = width.max(200.0);
+        let height = height.max(320.0);
+        let sx = width / self.width;
+        let sy = height / self.height;
+        self.player_x = (self.player_x * sx).clamp(20.0, width - 20.0);
+        self.player_y = height - 72.0;
+        self.player_target_x = (self.player_target_x * sx).clamp(20.0, width - 20.0);
+        for orb in &mut self.orbs { orb.x *= sx; orb.y *= sy; }
+        for enemy in &mut self.enemies { enemy.x *= sx; enemy.y *= sy; }
+        for particle in &mut self.particles { particle.x *= sx; particle.y *= sy; }
+        for telegraph in &mut self.telegraphs { telegraph.x *= sx; telegraph.y *= sy; }
+        for beam in &mut self.beams {
+            beam.x1 *= sx; beam.x2 *= sx; beam.y1 *= sy; beam.y2 *= sy;
+        }
+        for energy in &mut self.energies { energy.x *= sx; energy.y *= sy; }
+        self.width = width;
+        self.height = height;
+    }
+
     pub fn move_player(&mut self, target_x: f32) {
         if self.game_over || !target_x.is_finite() {
             return;
         }
-        self.player_x = target_x.clamp(20.0, (self.width - 20.0).max(20.0));
+        self.player_target_x = target_x.clamp(20.0, (self.width - 20.0).max(20.0));
     }
 
     /// Power-ups: 1=Solar Shield (+30 maxHP, heal 30), 2=Surge Burst (20s),
     /// 3=Freeze Schedule (12s). Consumes one pending choice if available.
+    /// 4=Beam Width & Multi-Shot, 5=Cryo Nova, 6=Chain Lightning,
+    /// 7=Plasma Shield Overcharge, 8=Overclock Speed & Magnet Radius.
     pub fn apply_powerup(&mut self, id: u8) {
         if self.game_over {
             return;
@@ -338,6 +385,31 @@ impl Universe {
             }
             3 => {
                 self.freeze_timer = 12.0;
+            }
+            4 => {
+                // Beam Width & Multi-Shot
+                self.beam_width_mult *= 1.25;
+                self.multi_shot_chance = (self.multi_shot_chance + 0.25).min(1.0);
+            }
+            5 => {
+                // Cryo Nova
+                self.cryo_nova = true;
+            }
+            6 => {
+                // Chain Lightning Merges
+                self.chain_lightning = true;
+            }
+            7 => {
+                // Plasma Shield Overcharge
+                self.plasma_shield = true;
+                self.player_max_hp += 40.0;
+                self.player_hp = (self.player_hp + 40.0).min(self.player_max_hp);
+                self.plasma_shield_regen = 2.0;
+            }
+            8 => {
+                // Overclock Speed & Magnet Radius
+                self.overclock_speed *= 1.3;
+                self.magnet_radius_mult *= 2.0;
             }
             _ => {}
         }
@@ -445,6 +517,10 @@ impl Universe {
         }
         self.frame_count += 1;
         self.run_time += dt;
+        // Time-based pursuit: input updates a target; physics owns motion.
+        let distance = self.player_target_x - self.player_x;
+        let step = 520.0 * self.overclock_speed.min(3.0) * dt;
+        self.player_x += distance.clamp(-step, step);
         if self.invuln_timer > 0.0 {
             self.invuln_timer -= dt;
         }
@@ -460,6 +536,11 @@ impl Universe {
         }
         if self.freeze_timer > 0.0 {
             self.freeze_timer -= dt;
+        }
+
+        // Plasma Shield regen: 2 HP/sec while above 50% HP
+        if self.plasma_shield && self.player_hp > self.player_max_hp * 0.5 {
+            self.player_hp = (self.player_hp + self.plasma_shield_regen * dt).min(self.player_max_hp);
         }
 
         // Victory: Hold Until Dawn (finite modes only).
@@ -511,6 +592,7 @@ impl Universe {
                 radius,
                 speed: (48.0 + (self.level as f32) * 2.5) * self.speed_scale * sp_mul * (1.0 + self.overtime_mins() * 0.03),
                 kind,
+                frozen_until: 0.0,
             });
             self.next_id += 1;
         }
@@ -585,181 +667,11 @@ impl Universe {
             self.telegraphs.push(Telegraph { x: ex, y: ey, kind, timer: TELEGRAPH_TIME });
         }
 
-        // 2. Physics update for Orbs
-        let gravity = 350.0;
-        let floor = self.height - 100.0;
-        for orb in self.orbs.iter_mut() {
-            orb.vy += gravity * dt;
-            orb.x += orb.vx * dt;
-            orb.y += orb.vy * dt;
-            orb.vx *= 0.98;
-            orb.vy *= 0.98;
-
-            if orb.x - orb.radius < 0.0 {
-                orb.x = orb.radius;
-                orb.vx *= -0.4;
-            } else if orb.x + orb.radius > self.width {
-                orb.x = self.width - orb.radius;
-                orb.vx *= -0.4;
-            }
-            if orb.y + orb.radius > floor {
-                orb.y = floor - orb.radius;
-                orb.vy *= -0.3;
-                orb.vx *= 0.8;
-            }
-        }
-
-        // 3. Resolve Orb-Orb collisions & merging
-        let mut new_orbs = Vec::new();
-        let orb_len = self.orbs.len();
-        for i in 0..orb_len {
-            if self.orbs[i].is_merged {
-                continue;
-            }
-            for j in (i + 1)..orb_len {
-                if self.orbs[j].is_merged {
-                    continue;
-                }
-                let dx = self.orbs[j].x - self.orbs[i].x;
-                let dy = self.orbs[j].y - self.orbs[i].y;
-                let dist_sq = dx * dx + dy * dy;
-                let min_dist = self.orbs[i].radius + self.orbs[j].radius;
-
-                if dist_sq < min_dist * min_dist && dist_sq > 0.001 {
-                    let dist = dist_sq.sqrt();
-                    let nx = dx / dist;
-                    let ny = dy / dist;
-
-                    if self.orbs[i].level == self.orbs[j].level {
-                        self.orbs[i].is_merged = true;
-                        self.orbs[j].is_merged = true;
-
-                        let next_level = (self.orbs[i].level + 1).min(10);
-                        let mid_x = (self.orbs[i].x + self.orbs[j].x) * 0.5;
-                        let mid_y = (self.orbs[i].y + self.orbs[j].y) * 0.5;
-                        let radius = orb_radius(next_level);
-
-                        new_orbs.push(Orb {
-                            id: self.next_id,
-                            x: mid_x,
-                            y: mid_y,
-                            vx: (self.orbs[i].vx + self.orbs[j].vx) * 0.5,
-                            vy: (self.orbs[i].vy + self.orbs[j].vy) * 0.5 - 50.0,
-                            level: next_level,
-                            radius,
-                            mass: radius * radius,
-                            is_merged: false,
-                        });
-                        self.next_id += 1;
-
-                        // Combo: chain merges inside window.
-                        if self.combo_timer > 0.0 {
-                            self.combo += 1;
-                        } else {
-                            self.combo = 1;
-                        }
-                        self.combo_timer = COMBO_WINDOW;
-                        if self.combo > self.best_combo {
-                            self.best_combo = self.combo;
-                        }
-                        let mult = self.combo.min(COMBO_CAP);
-                        self.merge_count += 1;
-                        self.last_merge_tier = next_level as u32;
-
-                        self.score += (next_level as u32) * 50 * mult;
-                        self.xp += (next_level as u32) * 20;
-                        if self.xp >= self.next_xp {
-                            self.level += 1;
-                            self.xp = 0;
-                            self.next_xp = (self.next_xp as f32 * 1.5) as u32;
-                            self.pending_choices += 1;
-                            self.player_hp =
-                                (self.player_hp + 20.0).min(self.player_max_hp);
-                        }
-
-                        // Radial explosion — one particle per direction.
-                        if self.particles.len() < MAX_PARTICLES {
-                            let n = 12usize;
-                            for k in 0..n {
-                                if self.particles.len() >= MAX_PARTICLES {
-                                    break;
-                                }
-                                let angle =
-                                    (k as f32) * 6.28318 / (n as f32);
-                                self.particles.push(Particle {
-                                    x: mid_x,
-                                    y: mid_y,
-                                    vx: angle.cos() * 120.0,
-                                    vy: angle.sin() * 120.0,
-                                    life: 0.4,
-                                    max_life: 0.4,
-                                    color_tier: next_level,
-                                });
-                            }
-                        }
-
-                        // Area damage to nearby enemies (Surge x1.5)
-                        let surge_mult = if self.surge_timer > 0.0 { 1.5 } else { 1.0 };
-                        let burst_radius =
-                            (80.0 + (next_level as f32) * 20.0) * surge_mult;
-                        let damage =
-                            (30.0 + (next_level as f32) * 25.0) * surge_mult;
-                        for enemy in self.enemies.iter_mut() {
-                            let edx = enemy.x - mid_x;
-                            let edy = enemy.y - mid_y;
-                            if edx * edx + edy * edy
-                                <= burst_radius * burst_radius
-                            {
-                                enemy.hp -= damage;
-                            }
-                        }
-
-                        // P2: directional beam — merge discharge fires toward
-                        // the battery. Position matters: merge above threats.
-                        let bx2 = self.player_x;
-                        let by2 = self.player_y;
-                        for enemy in self.enemies.iter_mut() {
-                            if seg_dist(enemy.x, enemy.y, mid_x, mid_y, bx2, by2)
-                                <= BEAM_HALF_WIDTH
-                            {
-                                enemy.hp -= damage;
-                            }
-                        }
-                        if self.beams.len() < MAX_BEAMS {
-                            self.beams.push(Beam {
-                                x1: mid_x,
-                                y1: mid_y,
-                                x2: bx2,
-                                y2: by2,
-                                life: BEAM_LIFE,
-                                max_life: BEAM_LIFE,
-                            });
-                        }
-
-                        break;
-                    } else {
-                        let overlap = min_dist - dist;
-                        let total_mass =
-                            self.orbs[i].mass + self.orbs[j].mass;
-                        self.orbs[i].x -=
-                            nx * overlap * (self.orbs[j].mass / total_mass);
-                        self.orbs[i].y -=
-                            ny * overlap * (self.orbs[j].mass / total_mass);
-                        self.orbs[j].x +=
-                            nx * overlap * (self.orbs[i].mass / total_mass);
-                        self.orbs[j].y +=
-                            ny * overlap * (self.orbs[i].mass / total_mass);
-                    }
-                }
-            }
-        }
-
-        self.orbs.retain(|o| !o.is_merged);
-        for o in new_orbs {
-            if self.orbs.len() < MAX_ORBS {
-                self.orbs.push(o);
-            }
-        }
+        // Adaptive cell substeps limit travel to less than half the smallest radius.
+        let min_radius = self.orbs.iter().map(|o| o.radius).fold(18.0_f32, f32::min);
+        let max_speed = self.orbs.iter().map(|o| (o.vx * o.vx + o.vy * o.vy).sqrt()).fold(0.0_f32, f32::max);
+        let steps = (((max_speed + 350.0 * dt) * dt / (min_radius * 0.45)).ceil() as usize).clamp(1, 16);
+        for _ in 0..steps { self.step_cells(dt / steps as f32); }
 
         // 4. Update enemies (seek player, capped contact DPS + invuln window)
         let px = self.player_x;
@@ -770,8 +682,9 @@ impl Universe {
             let dx = px - enemy.x;
             let dy = py - enemy.y;
             let dist = (dx * dx + dy * dy).sqrt().max(0.001);
-            enemy.vx = (dx / dist) * enemy.speed * freeze_mult;
-            enemy.vy = (dy / dist) * enemy.speed * freeze_mult;
+            let cryo_mult = if enemy.frozen_until > self.run_time { 0.0 } else { 1.0 };
+            enemy.vx = (dx / dist) * enemy.speed * freeze_mult * cryo_mult;
+            enemy.vy = (dy / dist) * enemy.speed * freeze_mult * cryo_mult;
             enemy.x += enemy.vx * dt;
             enemy.y += enemy.vy * dt;
 
@@ -835,13 +748,15 @@ impl Universe {
             }
         }
         let mut harvested = 0u32;
+        let magnet_radius = 36.0 * self.magnet_radius_mult;
+        let magnet_radius_sq = magnet_radius * magnet_radius;
         self.energies.retain(|e| {
             if e.life <= 0.0 {
                 return false;
             }
             let dx = e.x - ppx;
             let dy = e.y - ppy;
-            if dx * dx + dy * dy <= 36.0 * 36.0 {
+            if dx * dx + dy * dy <= magnet_radius_sq {
                 harvested += 1;
                 false
             } else {
@@ -853,12 +768,308 @@ impl Universe {
         }
     }
 
-    /// Packed render data. Header (26 floats, append-only; 0..16 stable):
+    fn step_cells(&mut self, dt: f32) {
+        // 2. Physics update for Orbs
+        let gravity = 350.0;
+        let floor = self.height - 100.0;
+        for orb in self.orbs.iter_mut() {
+            orb.vy = (orb.vy + gravity * dt).min(900.0);
+            orb.x += orb.vx * dt;
+            orb.y += orb.vy * dt;
+            orb.vx *= (-0.35 * dt).exp();
+
+            if orb.x - orb.radius < 0.0 {
+                orb.x = orb.radius;
+                orb.vx *= -0.4;
+            } else if orb.x + orb.radius > self.width {
+                orb.x = self.width - orb.radius;
+                orb.vx *= -0.4;
+            }
+            if orb.y + orb.radius > floor {
+                orb.y = floor - orb.radius;
+                orb.vy = if orb.vy > 35.0 { -orb.vy * 0.18 } else { 0.0 };
+                orb.vx *= (-9.0 * dt).exp();
+            }
+        }
+
+        // 3. Resolve Orb-Orb collisions & merging
+        let mut new_orbs = Vec::new();
+        let orb_len = self.orbs.len();
+        for i in 0..orb_len {
+            if self.orbs[i].is_merged {
+                continue;
+            }
+            for j in (i + 1)..orb_len {
+                if self.orbs[j].is_merged {
+                    continue;
+                }
+                let dx = self.orbs[j].x - self.orbs[i].x;
+                let dy = self.orbs[j].y - self.orbs[i].y;
+                let dist_sq = dx * dx + dy * dy;
+                let min_dist = self.orbs[i].radius + self.orbs[j].radius;
+
+                if dist_sq < min_dist * min_dist {
+                    let dist = dist_sq.sqrt().max(0.001);
+                    let nx = if dist_sq <= 0.001 { 1.0 } else { dx / dist };
+                    let ny = if dist_sq <= 0.001 { 0.0 } else { dy / dist };
+
+                    if self.orbs[i].level == self.orbs[j].level {
+                        self.orbs[i].is_merged = true;
+                        self.orbs[j].is_merged = true;
+
+                        let next_level = (self.orbs[i].level + 1).min(10);
+                        let mid_x = (self.orbs[i].x + self.orbs[j].x) * 0.5;
+                        let mid_y = (self.orbs[i].y + self.orbs[j].y) * 0.5;
+                        let radius = orb_radius(next_level);
+
+                        new_orbs.push(Orb {
+                            id: self.next_id,
+                            x: mid_x,
+                            y: mid_y,
+                            vx: (self.orbs[i].vx * self.orbs[i].mass + self.orbs[j].vx * self.orbs[j].mass) / (self.orbs[i].mass + self.orbs[j].mass) * 0.75,
+                            vy: ((self.orbs[i].vy * self.orbs[i].mass + self.orbs[j].vy * self.orbs[j].mass) / (self.orbs[i].mass + self.orbs[j].mass) * 0.75 - 24.0).clamp(-180.0, 600.0),
+                            level: next_level,
+                            radius,
+                            mass: radius * radius,
+                            is_merged: false,
+                        });
+                        self.next_id += 1;
+                        // A restrained discharge pushes neighbouring cells, not the entire pile.
+                        for k in 0..orb_len {
+                            if k == i || k == j || self.orbs[k].is_merged { continue; }
+                            let dx = self.orbs[k].x - mid_x;
+                            let dy = self.orbs[k].y - mid_y;
+                            let distance = (dx * dx + dy * dy).sqrt().max(1.0);
+                            if distance < 100.0 {
+                                let kick = 38.0 * (1.0 - distance / 100.0);
+                                self.orbs[k].vx += dx / distance * kick;
+                                self.orbs[k].vy += dy / distance * kick;
+                            }
+                        }
+
+                        // Combo: chain merges inside window.
+                        if self.combo_timer > 0.0 {
+                            self.combo += 1;
+                        } else {
+                            self.combo = 1;
+                        }
+                        self.combo_timer = COMBO_WINDOW;
+                        if self.combo > self.best_combo {
+                            self.best_combo = self.combo;
+                        }
+                        let mult = self.combo.min(COMBO_CAP);
+                        self.merge_count += 1;
+                        self.last_merge_tier = next_level as u32;
+
+                        self.score += (next_level as u32) * 50 * mult;
+                        self.xp += (next_level as u32) * 20;
+                        if self.xp >= self.next_xp {
+                            self.level += 1;
+                            self.xp = 0;
+                            self.next_xp = (self.next_xp as f32 * 1.5) as u32;
+                            self.pending_choices += 1;
+                            self.player_hp =
+                                (self.player_hp + 20.0).min(self.player_max_hp);
+                        }
+
+                        // Radial explosion — one particle per direction.
+                        if self.particles.len() < MAX_PARTICLES {
+                            let n = 12usize;
+                            for k in 0..n {
+                                if self.particles.len() >= MAX_PARTICLES {
+                                    break;
+                                }
+                                let angle =
+                                    (k as f32) * 6.28318 / (n as f32);
+                                self.particles.push(Particle {
+                                    x: mid_x,
+                                    y: mid_y,
+                                    vx: angle.cos() * 120.0,
+                                    vy: angle.sin() * 120.0,
+                                    life: 0.4,
+                                    max_life: 0.4,
+                                    color_tier: next_level,
+                                });
+                            }
+                        }
+
+                        // Area damage to nearby enemies (Surge x1.5)
+                        let surge_mult = if self.surge_timer > 0.0 { 1.5 } else { 1.0 };
+                        let burst_radius =
+                            (80.0 + (next_level as f32) * 20.0) * surge_mult;
+                        let damage =
+                            (30.0 + (next_level as f32) * 25.0) * surge_mult;
+                        for enemy in self.enemies.iter_mut() {
+                            let edx = enemy.x - mid_x;
+                            let edy = enemy.y - mid_y;
+                            if edx * edx + edy * edy
+                                <= burst_radius * burst_radius
+                            {
+                                enemy.hp -= damage;
+                            }
+                        }
+
+                        // Cryo Nova: freeze enemies in 120px radius for 2s
+                        if self.cryo_nova {
+                            let cryo_radius = 120.0;
+                            for enemy in self.enemies.iter_mut() {
+                                let edx = enemy.x - mid_x;
+                                let edy = enemy.y - mid_y;
+                                if edx * edx + edy * edy <= cryo_radius * cryo_radius {
+                                    enemy.frozen_until = self.run_time + 2.0;
+                                }
+                            }
+                        }
+
+                        // Chain Lightning: arcs jump to 2 nearby enemies
+                        if self.chain_lightning {
+                            let mut targets: Vec<&mut Enemy> = self.enemies.iter_mut()
+                                .filter(|e| {
+                                    let edx = e.x - mid_x;
+                                    let edy = e.y - mid_y;
+                                    edx * edx + edy * edy <= 200.0 * 200.0
+                                })
+                                .collect();
+                            // Sort by distance, take closest 2
+                            targets.sort_by(|a, b| {
+                                let da = (a.x - mid_x).powi(2) + (a.y - mid_y).powi(2);
+                                let db = (b.x - mid_x).powi(2) + (b.y - mid_y).powi(2);
+                                da.partial_cmp(&db).unwrap()
+                            });
+                            for enemy in targets.iter_mut().take(2) {
+                                enemy.hp -= damage * 0.6;
+                            }
+                        }
+
+                        // P2: directional beam — merge discharge fires toward
+                        // the battery. Position matters: merge above threats.
+                        let bx2 = self.player_x;
+                        let by2 = self.player_y;
+
+                        // Primary beam
+                        let beam_half_width = BEAM_HALF_WIDTH * self.beam_width_mult;
+                        for enemy in self.enemies.iter_mut() {
+                            if seg_dist(enemy.x, enemy.y, mid_x, mid_y, bx2, by2)
+                                <= beam_half_width
+                            {
+                                enemy.hp -= damage;
+                            }
+                        }
+                        if self.beams.len() < MAX_BEAMS {
+                            self.beams.push(Beam {
+                                x1: mid_x,
+                                y1: mid_y,
+                                x2: bx2,
+                                y2: by2,
+                                life: BEAM_LIFE,
+                                max_life: BEAM_LIFE,
+                            });
+                        }
+
+                        // Multi-shot: chance for parallel beam offset
+                        if self.multi_shot_chance > 0.0 && self.rand01(9999) < self.multi_shot_chance {
+                            let offset = 40.0; // pixels to side
+                            let bx3 = bx2 + offset;
+                            let by3 = by2;
+                            for enemy in self.enemies.iter_mut() {
+                                if seg_dist(enemy.x, enemy.y, mid_x, mid_y, bx3, by3)
+                                    <= beam_half_width
+                                {
+                                    enemy.hp -= damage * 0.8;
+                                }
+                            }
+                            if self.beams.len() < MAX_BEAMS {
+                                self.beams.push(Beam {
+                                    x1: mid_x,
+                                    y1: mid_y,
+                                    x2: bx3,
+                                    y2: by3,
+                                    life: BEAM_LIFE,
+                                    max_life: BEAM_LIFE,
+                                });
+                            }
+                        }
+
+                        break;
+                    } else {
+                        let relative_normal = (self.orbs[j].vx - self.orbs[i].vx) * nx
+                            + (self.orbs[j].vy - self.orbs[i].vy) * ny;
+                        if relative_normal < 0.0 {
+                            let inv_i = 1.0 / self.orbs[i].mass;
+                            let inv_j = 1.0 / self.orbs[j].mass;
+                            let impulse = -(1.0 + 0.12) * relative_normal / (inv_i + inv_j);
+                            self.orbs[i].vx -= impulse * inv_i * nx;
+                            self.orbs[i].vy -= impulse * inv_i * ny;
+                            self.orbs[j].vx += impulse * inv_j * nx;
+                            self.orbs[j].vy += impulse * inv_j * ny;
+                            let tx = -ny;
+                            let ty = nx;
+                            let tangent = (self.orbs[j].vx - self.orbs[i].vx) * tx
+                                + (self.orbs[j].vy - self.orbs[i].vy) * ty;
+                            let friction = (-tangent / (inv_i + inv_j)).clamp(-impulse * 0.22, impulse * 0.22);
+                            self.orbs[i].vx -= friction * inv_i * tx;
+                            self.orbs[i].vy -= friction * inv_i * ty;
+                            self.orbs[j].vx += friction * inv_j * tx;
+                            self.orbs[j].vy += friction * inv_j * ty;
+                        }
+                        let overlap = min_dist - dist;
+                        let total_mass =
+                            self.orbs[i].mass + self.orbs[j].mass;
+                        self.orbs[i].x -=
+                            nx * overlap * (self.orbs[j].mass / total_mass);
+                        self.orbs[i].y -=
+                            ny * overlap * (self.orbs[j].mass / total_mass);
+                        self.orbs[j].x +=
+                            nx * overlap * (self.orbs[i].mass / total_mass);
+                        self.orbs[j].y +=
+                            ny * overlap * (self.orbs[i].mass / total_mass);
+                    }
+                }
+            }
+        }
+
+        self.orbs.retain(|o| !o.is_merged);
+        for o in new_orbs {
+            if self.orbs.len() < MAX_ORBS {
+                self.orbs.push(o);
+            }
+        }
+
+        // Additional constraint passes keep dense piles from interpenetrating.
+        for _ in 0..3 {
+            for i in 0..self.orbs.len() {
+                for j in i + 1..self.orbs.len() {
+                    let dx = self.orbs[j].x - self.orbs[i].x;
+                    let dy = self.orbs[j].y - self.orbs[i].y;
+                    let distance = (dx * dx + dy * dy).sqrt().max(0.001);
+                    let overlap = self.orbs[i].radius + self.orbs[j].radius - distance;
+                    if overlap <= 0.1 || self.orbs[i].level == self.orbs[j].level { continue; }
+                    let nx = if distance <= 0.001 { 1.0 } else { dx / distance };
+                    let ny = if distance <= 0.001 { 0.0 } else { dy / distance };
+                    let total = self.orbs[i].mass + self.orbs[j].mass;
+                    let wi = self.orbs[j].mass / total;
+                    let wj = self.orbs[i].mass / total;
+                    self.orbs[i].x -= nx * overlap * wi;
+                    self.orbs[i].y -= ny * overlap * wi;
+                    self.orbs[j].x += nx * overlap * wj;
+                    self.orbs[j].y += ny * overlap * wj;
+                }
+            }
+            for cell in &mut self.orbs {
+                cell.x = cell.x.clamp(cell.radius, (self.width - cell.radius).max(cell.radius));
+                cell.y = cell.y.min(self.height - 100.0 - cell.radius);
+            }
+        }
+    }
+
+    /// Packed render data. Header (33 floats, append-only; 0..16 stable):
     /// [orb_count, enemy_count, particle_count, player_x, player_y,
     ///  player_hp, player_max_hp, score, level, xp, next_xp,
     ///  combo, combo_frac, best_combo, pending_choices, surge_left, freeze_left,
     ///  wave, time_left, victory, telegraph_count, merge_count,
-    ///  gauge, beam_count, energy_count, last_merge_tier]
+    ///  last_merge_tier, gauge, beam_count, energy_count,
+    ///  beam_width_mult, multi_shot_chance, cryo_nova, chain_lightning,
+    ///  plasma_shield, overclock_speed, magnet_radius_mult]
     /// Orbs: x, y, level, radius (4 each)
     /// Enemies: x, y, hp_percent, kind (4 each)
     /// Particles: x, y, life_percent, color_tier (4 each)
@@ -897,6 +1108,14 @@ impl Universe {
         self.render_buffer.push(self.gauge);
         self.render_buffer.push(self.beams.len() as f32);
         self.render_buffer.push(self.energies.len() as f32);
+        // Upgrade fields (indices 26-32)
+        self.render_buffer.push(self.beam_width_mult);
+        self.render_buffer.push(self.multi_shot_chance);
+        self.render_buffer.push(if self.cryo_nova { 1.0 } else { 0.0 });
+        self.render_buffer.push(if self.chain_lightning { 1.0 } else { 0.0 });
+        self.render_buffer.push(if self.plasma_shield { 1.0 } else { 0.0 });
+        self.render_buffer.push(self.overclock_speed);
+        self.render_buffer.push(self.magnet_radius_mult);
 
         for orb in &self.orbs {
             self.render_buffer.push(orb.x);
@@ -983,9 +1202,7 @@ mod tests {
         let mut u = Universe::new(480.0, 800.0);
         u.drop_orb(100.0, 1);
         u.drop_orb(100.0, 1);
-        // Force overlap
-        u.orbs[1].x = u.orbs[0].x + 1.0;
-        u.orbs[1].y = u.orbs[0].y + 1.0;
+        // Identical drop positions must merge without a collision normal.
         u.tick(0.016);
         assert_eq!(u.orbs.len(), 1);
         assert_eq!(u.orbs[0].level, 2);
@@ -1016,6 +1233,7 @@ mod tests {
                 radius: 10.0,
                 speed: 0.0,
                 kind: 0,
+                frozen_until: 0.0,
             });
         }
         u.tick(0.016);
@@ -1193,6 +1411,7 @@ mod tests {
             radius: 10.0,
             speed: 0.0,
             kind: 0,
+            frozen_until: 0.0,
         });
         u.drop_orb(100.0, 1);
         u.drop_orb(100.0, 1);
@@ -1227,6 +1446,7 @@ mod tests {
                 radius: 10.0,
                 speed: 0.0,
                 kind: 0,
+                frozen_until: 0.0,
             });
         }
         // L2 merge at the kill site: radial blast clears them.
@@ -1255,4 +1475,78 @@ mod tests {
         assert_eq!(u.orbs.len(), 1);
         assert_eq!(u.orbs[0].level, 4);
     }
+
+    #[test]
+    fn cryo_freeze_expires_without_changing_base_speed() {
+        let mut u = Universe::new(480.0, 800.0);
+        u.enemies.push(Enemy {
+            id: 1, x: 240.0, y: 200.0, vx: 0.0, vy: 0.0,
+            hp: 1000.0, max_hp: 1000.0, radius: 10.0, speed: 50.0,
+            kind: 0, frozen_until: 2.0,
+        });
+        u.tick(0.1);
+        assert_eq!(u.enemies[0].y, 200.0);
+        assert_eq!(u.enemies[0].speed, 50.0);
+        u.run_time = 2.0;
+        u.tick(0.1);
+        assert!(u.enemies[0].y > 200.0);
+    }
+
+    #[test]
+    fn resize_preserves_relative_positions_and_run_progress() {
+        let mut u = Universe::new(480.0, 800.0);
+        u.drop_orb(240.0, 2);
+        u.run_time = 42.0;
+        u.resize(320.0, 600.0);
+        assert_eq!(u.player_x, 160.0);
+        assert_eq!(u.player_y, 528.0);
+        assert_eq!(u.orbs[0].x, 160.0);
+        assert_eq!(u.orbs[0].y, 30.0);
+        assert_eq!(u.run_time, 42.0);
+    }
+    #[test]
+    fn movement_is_independent_of_pointer_event_frequency() {
+        let mut once = Universe::new(480.0, 800.0);
+        let mut repeated = Universe::new(480.0, 800.0);
+        once.move_player(440.0);
+        for _ in 0..100 { repeated.move_player(440.0); }
+        assert_eq!(once.player_x, 240.0);
+        for _ in 0..12 {
+            once.tick(1.0 / 60.0);
+            repeated.move_player(440.0);
+            repeated.tick(1.0 / 60.0);
+        }
+        assert!((once.player_x - repeated.player_x).abs() < 0.001);
+        assert!(once.player_x > 300.0 && once.player_x < 440.0);
+    }
+    #[test]
+    fn cell_collision_exchanges_velocity_and_separates() {
+        let mut u = Universe::new(480.0, 800.0);
+        u.drop_orb(200.0, 1); u.drop_orb(230.0, 2);
+        u.orbs[0].y = 300.0; u.orbs[1].y = 300.0;
+        u.orbs[0].vx = 100.0; u.orbs[1].vx = -100.0;
+        u.step_cells(1.0 / 60.0);
+        assert!(u.orbs[0].vx < 100.0);
+        assert!(u.orbs[1].vx > -100.0);
+        assert!(u.orbs[1].x - u.orbs[0].x >= u.orbs[0].radius + u.orbs[1].radius - 0.2);
+    }
+    #[test]
+    fn floor_friction_settles_a_cell() {
+        let mut u = Universe::new(480.0, 800.0);
+        u.drop_orb(240.0, 1);
+        u.orbs[0].y = 700.0 - u.orbs[0].radius; u.orbs[0].vx = 100.0;
+        for _ in 0..180 { u.step_cells(1.0 / 60.0); }
+        assert!(u.orbs[0].vx.abs() < 1.0);
+        assert!(u.orbs[0].vy.abs() < 1.0);
+        assert!(u.orbs[0].y + u.orbs[0].radius <= 700.01);
+    }
+    #[test]
+    fn fast_horizontal_cell_does_not_tunnel_through_a_match() {
+        let mut u = Universe::new(480.0, 800.0);
+        u.drop_orb(60.0, 1); u.drop_orb(150.0, 1);
+        u.orbs[0].y = 300.0; u.orbs[1].y = 300.0; u.orbs[0].vx = 4000.0;
+        u.tick(0.05);
+        assert_eq!(u.merge_count, 1);
+    }
+
 }

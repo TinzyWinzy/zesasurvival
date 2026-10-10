@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import type { BadgeId } from '../game/storage';
-import { BADGES } from '../game/storage';
+import { BADGES, MODES, STAR_BARS } from '../game/storage';
+import { useDialogFocus } from './useDialogFocus';
 
 interface GameOverModalProps {
   score: number;
@@ -29,6 +30,9 @@ function starRow(n: number) {
 export const GameOverModal: React.FC<GameOverModalProps> = ({ score, level, wave, seconds, victory, modeName, stars, bestScore, isNewBest, isNewStars, newBadges, onRestart, onMenu }) => {
   const [copied, setCopied] = useState(false);
   const [shareFailed, setShareFailed] = useState(false);
+  const dialogRef = useDialogFocus();
+  const currentMode = MODES.find((mode) => mode.name === modeName)?.id ?? 1;
+  const nextStar = STAR_BARS[currentMode].find((target) => target > score);
 
   const handleShare = async () => {
     const starTxt = stars > 0 ? ` ${starRow(stars)}` : '';
@@ -45,7 +49,8 @@ export const GameOverModal: React.FC<GameOverModalProps> = ({ score, level, wave
       await navigator.clipboard.writeText(text);
       setCopied(true);
       setTimeout(() => setCopied(false), 3000);
-    } catch {
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') return;
       // Fallback for insecure contexts / denied permissions
       try {
         const ta = document.createElement('textarea');
@@ -65,7 +70,7 @@ export const GameOverModal: React.FC<GameOverModalProps> = ({ score, level, wave
   };
 
   return (
-    <div className="fixed inset-0 bg-slate-950/90 backdrop-blur-md flex items-center justify-center p-4 z-50" role="dialog" aria-modal="true" aria-label={victory ? 'Victory' : 'Game over'}>
+    <div ref={dialogRef} className="fixed inset-0 overflow-y-auto bg-slate-950/90 backdrop-blur-md flex items-start justify-center p-4 z-50" role="dialog" aria-modal="true" aria-label={victory ? 'Victory' : 'Game over'}>
       <div className="bg-slate-900 border border-slate-800 p-6 rounded-2xl max-w-sm w-full text-center shadow-2xl">
         <div className="text-4xl mb-2" aria-hidden>{victory ? '🌅' : '💥'}</div>
         <h2 className={`text-2xl font-black mb-1 ${victory ? 'text-amber-400' : 'text-red-500'}`}>
@@ -93,6 +98,8 @@ export const GameOverModal: React.FC<GameOverModalProps> = ({ score, level, wave
           )}
         </div>
 
+        {nextStar && <p className="text-sm text-slate-300 mb-4">{(nextStar - score).toLocaleString()} more points to your next star.</p>}
+
         {newBadges.length > 0 && (
           <div className="bg-amber-500/10 border border-amber-500/30 p-3 rounded-xl mb-4">
             <div className="text-amber-400 text-xs font-black uppercase mb-1">Badges unlocked</div>
@@ -104,6 +111,7 @@ export const GameOverModal: React.FC<GameOverModalProps> = ({ score, level, wave
         )}
 
         <div className="flex flex-col gap-3">
+          <button autoFocus onClick={onRestart} className="w-full bg-amber-400 hover:bg-amber-300 text-slate-950 font-black py-3 px-4 rounded-xl transition shadow-lg">Play Again</button>
           <button
             onClick={handleShare}
             className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 px-4 rounded-xl transition shadow-lg flex items-center justify-center gap-2"
@@ -114,16 +122,10 @@ export const GameOverModal: React.FC<GameOverModalProps> = ({ score, level, wave
           {shareFailed && <p className="text-xs text-red-400">Share failed — copy the URL manually.</p>}
 
           <button
-            onClick={onRestart}
-            className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-3 px-4 rounded-xl transition shadow-lg"
-          >
-            Play Again
-          </button>
-          <button
             onClick={onMenu}
             className="w-full bg-transparent border border-slate-600 text-slate-300 font-bold py-2.5 px-4 rounded-xl text-sm"
           >
-            Change track
+            Modes & loadout
           </button>
         </div>
       </div>

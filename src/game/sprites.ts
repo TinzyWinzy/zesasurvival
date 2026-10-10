@@ -61,7 +61,7 @@ export function drawOrb(
   ctx.arc(x, y, r, 0, TAU);
   ctx.fillStyle = c;
   ctx.shadowColor = c;
-  ctx.shadowBlur = 10;
+  ctx.shadowBlur = tier >= 7 ? 4 : 0;
   ctx.fill();
   ctx.shadowBlur = 0;
 
@@ -146,56 +146,24 @@ export function drawEnemy(
   y: number,
   t: number
 ) {
-  const s = ENEMY_STYLE[kind] || ENEMY_STYLE[0];
-  const r = s.radius;
-  ctx.fillStyle = s.color;
-  ctx.shadowColor = s.color;
-  ctx.shadowBlur = 8;
-  if (kind === 0) {
-    poly(ctx, x, y, r, 4, -Math.PI / 2); // diamond
-    ctx.fill();
-    ctx.shadowBlur = 0;
-    ctx.fillStyle = 'rgba(13,13,17,0.85)';
-    poly(ctx, x, y, r * 0.38, 4, -Math.PI / 2);
-    ctx.fill();
-  } else if (kind === 1) {
-    poly(ctx, x, y, r, 3, -Math.PI / 2); // needle triangle
-    ctx.fill();
-    ctx.shadowBlur = 0;
-  } else if (kind === 2) {
-    poly(ctx, x, y, r, 6, 0); // armored hexagon
-    ctx.fill();
-    ctx.shadowBlur = 0;
-    ctx.strokeStyle = 'rgba(13,13,17,0.9)';
-    ctx.lineWidth = 2;
-    poly(ctx, x, y, r * 0.62, 6, 0);
-    ctx.stroke();
-  } else if (kind === 3) {
-    poly(ctx, x, y, r, 5, -Math.PI / 2); // pentagon
-    ctx.fill();
-    ctx.shadowBlur = 0;
-    ctx.fillStyle = 'rgba(255,255,255,0.9)';
-    ctx.beginPath();
-    ctx.arc(x, y, r * 0.2, 0, TAU);
-    ctx.fill();
-  } else {
-    ctx.beginPath(); // overlord core
-    ctx.arc(x, y, r, 0, TAU);
-    ctx.fill();
-    ctx.shadowBlur = 0;
-    ctx.strokeStyle = s.color;
-    ctx.lineWidth = 3;
-    ctx.beginPath();
-    ctx.arc(x, y, r + 5, 0, TAU);
-    ctx.stroke();
-    const a = t * 0.002; // rotating tick
-    ctx.strokeStyle = '#FFFFFF';
-    ctx.lineWidth = 2.5;
-    ctx.beginPath();
-    ctx.moveTo(x + Math.cos(a) * (r + 5), y + Math.sin(a) * (r + 5));
-    ctx.lineTo(x + Math.cos(a) * (r + 11), y + Math.sin(a) * (r + 11));
+  const radius = (ENEMY_STYLE[kind] || ENEMY_STYLE[0]).radius;
+  ctx.save();
+  ctx.fillStyle = '#250F1C';
+  ctx.strokeStyle = kind >= 3 ? '#FDA4AF' : '#FB466A';
+  ctx.lineWidth = kind === 2 ? 2.8 : 1.8;
+  const sides = kind === 0 ? 4 : kind === 1 ? 3 : kind === 2 ? 6 : kind === 3 ? 5 : 8;
+  poly(ctx, x, y, radius, sides, kind === 2 ? 0 : -Math.PI / 2);
+  ctx.fill(); ctx.stroke();
+  ctx.strokeStyle = '#FB466A';
+  ctx.lineWidth = 1;
+  poly(ctx, x, y, radius * 0.45, sides);
+  ctx.stroke();
+  if (kind === 4) {
+    ctx.strokeStyle = '#FDA4AF';
+    poly(ctx, x, y, radius + 7, 4, t * 0.001);
     ctx.stroke();
   }
+  ctx.restore();
 }
 
 export function drawPlayer(
@@ -205,51 +173,66 @@ export function drawPlayer(
   hpFrac: number,
   t: number
 ) {
-  // Shield ring: opacity tracks charge.
-  ctx.beginPath();
-  ctx.arc(x, y, 22, 0, TAU);
-  ctx.strokeStyle = `rgba(0,240,255,${0.2 + 0.5 * Math.max(0, Math.min(1, hpFrac))})`;
+  const health = Math.max(0, Math.min(1, hpFrac));
+  ctx.save();
+  ctx.strokeStyle = health < 0.3 ? '#FB7185' : '#67E8F9';
   ctx.lineWidth = 2;
-  ctx.stroke();
-  // Generator core.
-  ctx.beginPath();
-  ctx.arc(x, y, 16, 0, TAU);
-  ctx.fillStyle = '#00F0FF';
-  ctx.shadowColor = '#00F0FF';
-  ctx.shadowBlur = 15;
-  ctx.fill();
-  ctx.shadowBlur = 0;
-  ctx.fillStyle = '#06303A';
-  ctx.beginPath();
-  ctx.arc(x, y, 9, 0, TAU);
-  ctx.fill();
-  // Direction vector arrow (faces the swarm above).
-  const bob = Math.sin(t * 0.005) * 1.5;
-  ctx.fillStyle = '#FFFFFF';
-  ctx.beginPath();
-  ctx.moveTo(x, y - 26 + bob);
-  ctx.lineTo(x - 5, y - 18 + bob);
-  ctx.lineTo(x + 5, y - 18 + bob);
-  ctx.closePath();
-  ctx.fill();
+  ctx.fillStyle = '#092633';
+  ctx.fillRect(x - 16, y - 20, 32, 40);
+  ctx.strokeRect(x - 16, y - 20, 32, 40);
+  ctx.fillStyle = '#67E8F9';
+  ctx.fillRect(x - 6, y - 25, 12, 5);
+  for (let i = 0; i < 4; i++) {
+    ctx.fillStyle = health > i / 4 ? (health < 0.3 ? '#FB7185' : '#67E8F9') : '#153647';
+    ctx.fillRect(x - 11, y + 10 - i * 8, 22, 5);
+  }
+  ctx.strokeStyle = `rgba(103,232,249,${0.12 + health * 0.18})`;
+  ctx.beginPath(); ctx.arc(x, y, 28 + Math.sin(t * 0.002), 0, TAU); ctx.stroke();
+  ctx.restore();
 }
 
-/** Aimed discharge: one faint amber stroke. Damage lives in the engine;
- * the visual stays quiet so merges read clean. */
-export function drawBeam(
-  ctx: CanvasRenderingContext2D,
-  x1: number,
-  y1: number,
-  x2: number,
-  y2: number
-) {
-  ctx.beginPath();
-  ctx.moveTo(x1, y1);
-  ctx.lineTo(x2, y2);
-  ctx.strokeStyle = 'rgba(250,204,21,0.4)';
+export function drawBeam(ctx: CanvasRenderingContext2D, x1: number, y1: number, x2: number, y2: number, life = 1) {
+  ctx.save(); ctx.globalAlpha = Math.max(0, life);
+  ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x2,y2);
+  ctx.strokeStyle = 'rgba(250,204,21,0.22)'; ctx.lineWidth = 9; ctx.stroke();
+  ctx.strokeStyle = '#FDE68A'; ctx.lineWidth = 2; ctx.stroke();
+  ctx.strokeStyle = '#FFFBE8'; ctx.lineWidth = 0.8; ctx.stroke(); ctx.restore();
+}
+
+export function drawMergePulse(ctx: CanvasRenderingContext2D, x: number, y: number, tier: number, combo: number, fraction: number, reduced: boolean) {
+  ctx.save();
+  ctx.globalAlpha = Math.max(0, 1 - fraction);
+  ctx.strokeStyle = ORB_COLORS[tier] || '#FDE68A';
   ctx.lineWidth = 2;
-  ctx.lineCap = 'round';
-  ctx.stroke();
+  ctx.beginPath(); ctx.arc(x, y, reduced ? 28 : 18 + fraction * 65, 0, TAU); ctx.stroke();
+  ctx.fillStyle = '#FFFBEB'; ctx.font = 'bold 13px system-ui'; ctx.textAlign = 'center';
+  ctx.fillText(combo > 1 ? `MERGE ×${Math.min(combo,8)}` : `L${tier} MERGE`, x, y - 28 - (reduced ? 0 : fraction * 28));
+  ctx.restore();
+}
+
+export function drawArena(ctx: CanvasRenderingContext2D, width: number, height: number, dawn: number) {
+  const floor = height - 100;
+  ctx.save();
+  // Distant utility infrastructure remains below the active drop lanes.
+  ctx.strokeStyle = 'rgba(148,163,184,0.13)'; ctx.lineWidth = 1;
+  for (const x of [22, width - 22]) {
+    ctx.beginPath(); ctx.moveTo(x, floor - 130); ctx.lineTo(x - 15, floor); ctx.moveTo(x, floor - 130); ctx.lineTo(x + 15, floor);
+    for (let i = 1; i < 5; i++) { const y = floor - 130 + i * 24; ctx.moveTo(x - i * 3, y); ctx.lineTo(x + i * 3, y); }
+    ctx.stroke();
+  }
+  ctx.beginPath(); ctx.moveTo(22, floor - 110); ctx.quadraticCurveTo(width / 2, floor - 78, width - 22, floor - 110); ctx.stroke();
+  ctx.fillStyle = 'rgba(251,191,36,0.12)';
+  for (let i = 0; i < 8; i++) {
+    const x = i * width / 8;
+    const roof = floor - 20 - (i % 3) * 8;
+    ctx.fillStyle = 'rgba(8,17,32,0.45)'; ctx.fillRect(x, roof, width / 8 - 3, floor - roof);
+    ctx.fillStyle = `rgba(253,230,138,${0.08 + dawn * 0.3})`; ctx.fillRect(x + 8, roof + 8, 3, 4);
+  }
+  ctx.fillStyle = 'rgba(2,6,23,0.85)'; ctx.fillRect(0, floor, width, 100);
+  ctx.strokeStyle = '#38566A'; ctx.beginPath(); ctx.moveTo(0, floor); ctx.lineTo(width, floor); ctx.stroke();
+  ctx.strokeStyle = 'rgba(103,232,249,0.18)'; ctx.setLineDash([4, 8]); ctx.beginPath(); ctx.moveTo(0, height - 72); ctx.lineTo(width, height - 72); ctx.stroke();
+  ctx.setLineDash([]); ctx.font = '9px system-ui'; ctx.fillStyle = '#64748B'; ctx.textAlign = 'left'; ctx.fillText('CELL DECK', 10, floor + 13);
+  ctx.restore();
 }
 
 export function drawTelegraph(

@@ -21,6 +21,9 @@ interface Props {
   bestScores: Record<RunMode, number>;
   runs: RunRecord[];
   badges: BadgeId[];
+  offlineReady: boolean;
+  needRefresh: boolean;
+  onRefresh: () => void;
   onStart: (mode: RunMode, loadout: Loadout) => void;
 }
 
@@ -43,7 +46,7 @@ const LoadoutIcon: React.FC<{ id: Loadout; className?: string }> = ({ id, classN
 
 /** Signature: pylon mast + sagging transmission wire. */
 const WireRule: React.FC = () => (
-  <svg viewBox="0 0 320 16" className="w-full h-4 my-2.5 text-slate-600" preserveAspectRatio="none" aria-hidden>
+  <svg viewBox="0 0 320 16" className="w-full h-4 my-2.5 text-slate-400" preserveAspectRatio="none" aria-hidden>
     <path d="M6 2 V14 M2 6 H10 M3 10 H9" stroke="currentColor" strokeWidth="1" fill="none" />
     <path d="M6 4 Q160 15 314 4" stroke="currentColor" strokeWidth="1" fill="none" opacity="0.7" />
     <path d="M314 2 V14 M310 6 H318 M311 10 H317" stroke="currentColor" strokeWidth="1" fill="none" />
@@ -52,14 +55,14 @@ const WireRule: React.FC = () => (
 
 const SectionLabel: React.FC<{ children: React.ReactNode }> = ({ children }) => (
   <div className="flex items-center gap-2 mb-2">
-    <span className="text-[10px] font-black uppercase tracking-[0.22em] text-slate-500 whitespace-nowrap">{children}</span>
+    <span className="text-[10px] font-black uppercase tracking-[0.22em] text-slate-400 whitespace-nowrap">{children}</span>
     <span className="h-px flex-1 bg-slate-800" />
   </div>
 );
 
 const MODE_DURATION: Record<RunMode, string> = { 0: '3:00', 1: '5:00', 2: '∞' };
 
-export const ModeMenu: React.FC<Props> = ({ bestStars, bestScores, runs, badges, onStart }) => {
+export const ModeMenu: React.FC<Props> = ({ bestStars, bestScores, runs, badges, offlineReady, needRefresh, onRefresh, onStart }) => {
   const [mode, setMode] = useState<RunMode>(1);
   const [loadout, setLoadout] = useState<Loadout>(1);
 
@@ -89,11 +92,18 @@ export const ModeMenu: React.FC<Props> = ({ bestStars, bestScores, runs, badges,
               <p className="text-[10px] font-bold uppercase tracking-[0.28em] text-amber-500/80 mt-1">Load-shedding survival</p>
             </div>
           </div>
-          <p className="text-slate-500 text-[11px] tabular-nums mt-2 mb-1">
+          <p className="text-slate-400 text-[11px] tabular-nums mt-2 mb-1">
             {myBest > 0 ? `LAST BEST · ${MODES[mode].name.toUpperCase()} · ${myBest.toLocaleString()}` : 'HOLD THE GRID UNTIL DAWN'}
           </p>
 
           <WireRule />
+
+          <div className="rounded-lg border border-slate-700 bg-slate-900/80 p-3 mb-4 text-sm text-slate-300">
+            <p className="font-bold text-amber-300 mb-1">Hold the grid until dawn</p>
+            <p>Drop matching cells together to merge. Merges blast enemies and fire a beam toward your battery.</p>
+            <p className="mt-2">Move the battery to dodge threats and collect energy. A full charge powers your next drop.</p>
+            <p className="mt-2 text-xs text-slate-400">Touch: hold to aim, slide to move, release to drop. Mouse: move to dodge, click to drop. Keyboard: focus the arena, use ←/→ and Space.</p>
+          </div>
 
           <SectionLabel>Shift schedule</SectionLabel>
           <div className="flex flex-col gap-1.5 mb-1">
@@ -110,20 +120,20 @@ export const ModeMenu: React.FC<Props> = ({ bestStars, bestScores, runs, badges,
                 >
                   <span className={`w-1 shrink-0 ${sel ? 'bg-amber-400' : 'bg-slate-800'}`} aria-hidden />
                   <span className={`w-14 shrink-0 flex items-center justify-center border-r tabular-nums text-lg font-black ${
-                    sel ? 'text-amber-300 border-amber-400/25' : 'text-slate-600 border-slate-800'
+                    sel ? 'text-amber-300 border-amber-400/25' : 'text-slate-400 border-slate-800'
                   }`}>
                     {MODE_DURATION[m.id]}
                   </span>
                   <span className="flex-1 px-3 py-2.5 min-w-0">
                     <span className="flex justify-between items-center gap-2">
                       <span className={`font-black text-sm tracking-wide ${sel ? 'text-white' : 'text-slate-300'}`}>{m.name}</span>
-                      <span className={`text-xs tabular-nums ${sel ? 'text-amber-400' : 'text-slate-600'}`} aria-label={`${bestStars[m.id]} of 3 stars`}>
+                      <span className={`text-xs tabular-nums ${sel ? 'text-amber-400' : 'text-slate-400'}`} aria-label={`${bestStars[m.id]} of 3 stars`}>
                         {stars(bestStars[m.id])}
                       </span>
                     </span>
                     <span className="flex justify-between items-center gap-2 mt-0.5">
-                      <span className="text-slate-500 text-[11px] truncate">{m.desc}</span>
-                      <span className="text-slate-600 text-[10px] tabular-nums shrink-0">
+                      <span className="text-slate-400 text-[11px] truncate">{m.desc}</span>
+                      <span className="text-slate-400 text-[10px] tabular-nums shrink-0">
                         {(bestScores[m.id] ?? 0) > 0 ? `BEST ${(bestScores[m.id] ?? 0).toLocaleString()}` : ''}
                       </span>
                     </span>
@@ -133,7 +143,7 @@ export const ModeMenu: React.FC<Props> = ({ bestStars, bestScores, runs, badges,
             })}
           </div>
           {nextStarTarget !== null && (
-            <p className="text-[10px] text-slate-600 tabular-nums mb-3 px-0.5">
+            <p className="text-[10px] text-slate-400 tabular-nums mb-3 px-0.5">
               {nextStarIdx === 0 ? 'FIRST STAR' : `${nextStarIdx + 1}★`} AT {nextStarTarget.toLocaleString()} ON {MODES[mode].name.toUpperCase()}
             </p>
           )}
@@ -148,12 +158,12 @@ export const ModeMenu: React.FC<Props> = ({ bestStars, bestScores, runs, badges,
                   onClick={() => setLoadout(l.id)}
                   aria-pressed={sel}
                   className={`rounded-lg border p-2.5 text-center transition-colors ${
-                    sel ? 'border-emerald-400/60 bg-emerald-500/[0.07] text-emerald-300' : 'border-slate-800 bg-slate-900/60 text-slate-500 hover:bg-slate-900'
+                    sel ? 'border-emerald-400/60 bg-emerald-500/[0.07] text-emerald-300' : 'border-slate-800 bg-slate-900/60 text-slate-400 hover:bg-slate-900'
                   }`}
                 >
                   <LoadoutIcon id={l.id} className="w-5 h-5 mx-auto" />
                   <div className={`text-[11px] font-bold mt-1.5 leading-tight ${sel ? 'text-white' : 'text-slate-400'}`}>{l.name}</div>
-                  <div className={`text-[9px] mt-0.5 leading-tight ${sel ? 'text-emerald-400/90' : 'text-slate-600'}`}>{l.desc}</div>
+                  <div className={`text-[11px] mt-0.5 leading-tight ${sel ? 'text-emerald-300' : 'text-slate-400'}`}>{l.desc}</div>
                 </button>
               );
             })}
@@ -166,9 +176,9 @@ export const ModeMenu: React.FC<Props> = ({ bestStars, bestScores, runs, badges,
             <div className="mb-1">
               {runs.slice(0, 5).map((r, i) => (
                 <div key={`${r.date}-${i}`} className={`flex items-center justify-between px-1 py-1.5 text-[11px] tabular-nums ${i % 2 ? 'bg-slate-900/40 rounded' : ''}`}>
-                  <span className="text-slate-600 w-12">{fmtDate(r.date)}</span>
+                  <span className="text-slate-400 w-12">{fmtDate(r.date)}</span>
                   <span className="text-slate-400 font-bold w-14 uppercase text-[10px] tracking-wider">{MODES[r.mode]?.name ?? '?'}</span>
-                  <span className="text-amber-500/80 w-5">{stars(r.stars)}</span>
+                  <span className="text-amber-400 w-14">{stars(r.stars)}</span>
                   <span className={`font-black w-12 text-right ${r.victory ? 'text-emerald-400' : 'text-slate-200'}`}>
                     {r.score.toLocaleString()}
                   </span>
@@ -176,7 +186,7 @@ export const ModeMenu: React.FC<Props> = ({ bestStars, bestScores, runs, badges,
               ))}
             </div>
           ) : (
-            <p className="text-[11px] text-slate-600 px-1 mb-1">No shifts logged yet.</p>
+            <p className="text-[11px] text-slate-400 px-1 mb-1">No shifts logged yet.</p>
           )}
 
           <SectionLabel>Badges · {badges.length}/{BADGES.length}</SectionLabel>
@@ -200,7 +210,8 @@ export const ModeMenu: React.FC<Props> = ({ bestStars, bestScores, runs, badges,
             })}
           </div>
 
-          <p className="text-[9px] text-slate-700 text-center mt-5 tabular-nums uppercase tracking-widest">100% offline · no account</p>
+          <p className="text-xs text-slate-400 text-center mt-5" role="status">{offlineReady ? 'Ready for offline play · no account' : 'Offline play after first download · no account'}</p>
+          {needRefresh && <button onClick={onRefresh} className="w-full mt-3 rounded-lg bg-indigo-600 text-white font-bold py-3">Install game update</button>}
         </div>
       </div>
 
@@ -214,7 +225,7 @@ export const ModeMenu: React.FC<Props> = ({ bestStars, bestScores, runs, badges,
             <span aria-hidden className="text-slate-950/50">◀</span>
             <span className="flex flex-col items-center leading-none">
               <span>START SHIFT</span>
-              <span className="text-[9px] font-bold uppercase tracking-[0.2em] text-slate-950/60 mt-1">
+              <span className="text-[11px] font-bold uppercase tracking-[0.2em] text-slate-950/60 mt-1">
                 {MODES[mode].name} · {loadoutName}
               </span>
             </span>
