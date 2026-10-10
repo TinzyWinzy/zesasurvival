@@ -70,7 +70,7 @@ export const GameOverModal: React.FC<GameOverModalProps> = ({ score, level, wave
   };
 
   return (
-    <div ref={dialogRef} className="fixed inset-0 overflow-y-auto bg-slate-950/90 backdrop-blur-md flex items-start justify-center p-4 z-50" role="dialog" aria-modal="true" aria-label={victory ? 'Victory' : 'Game over'}>
+    <div ref={dialogRef} className="absolute inset-0 overflow-y-auto bg-slate-950/90 backdrop-blur-md flex items-start justify-center p-4 z-50" role="dialog" aria-modal="true" aria-label={victory ? 'Victory' : 'Game over'}>
       <div className="bg-slate-900 border border-slate-800 p-6 rounded-2xl max-w-sm w-full text-center shadow-2xl">
         <div className="text-4xl mb-2" aria-hidden>{victory ? '🌅' : '💥'}</div>
         <h2 className={`text-2xl font-black mb-1 ${victory ? 'text-amber-400' : 'text-red-500'}`}>

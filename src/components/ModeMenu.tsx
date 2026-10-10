@@ -78,8 +78,8 @@ export const ModeMenu: React.FC<Props> = ({ bestStars, bestScores, runs, badges,
       <div className="menu-board absolute inset-0" aria-hidden />
       <div className="menu-grid absolute inset-0" aria-hidden />
 
-      <div className="relative h-full overflow-y-auto">
-        <div className="w-full max-w-sm mx-auto px-4 pt-7 pb-28">
+      <div className="menu-scroll relative h-full overflow-y-auto">
+        <div className="menu-content w-full max-w-sm mx-auto px-4 pt-4 pb-28">
 
           {/* Header: utility-board identity */}
           <div className="flex items-center gap-3 mb-1">
@@ -96,17 +96,16 @@ export const ModeMenu: React.FC<Props> = ({ bestStars, bestScores, runs, badges,
             {myBest > 0 ? `LAST BEST · ${MODES[mode].name.toUpperCase()} · ${myBest.toLocaleString()}` : 'HOLD THE GRID UNTIL DAWN'}
           </p>
 
-          <WireRule />
 
-          <div className="rounded-lg border border-slate-700 bg-slate-900/80 p-3 mb-4 text-sm text-slate-300">
-            <p className="font-bold text-amber-300 mb-1">Hold the grid until dawn</p>
-            <p>Drop matching cells together to merge. Merges blast enemies and fire a beam toward your battery.</p>
-            <p className="mt-2">Move the battery to dodge threats and collect energy. A full charge powers your next drop.</p>
-            <p className="mt-2 text-xs text-slate-400">Touch: hold to aim, slide to move, release to drop. Mouse: move to dodge, click to drop. Keyboard: focus the arena, use ←/→ and Space.</p>
-          </div>
+
+          <details className="menu-instructions mt-3 rounded-lg border border-slate-700 bg-slate-900/80 p-3 mb-3 text-sm text-slate-300">
+            <summary className="font-bold text-amber-300 cursor-pointer">Slide to move. Release to drop.</summary>
+            <p className="mt-2">Hold to aim, slide to move your battery, then release to drop a cell. Match cells to merge and blast enemies. Collect energy to charge your next drop.</p>
+            <p className="mt-2 text-xs text-slate-400">Mouse: move and click. Keyboard: focus the arena, use ←/→ and Space.</p>
+          </details>
 
           <SectionLabel>Shift schedule</SectionLabel>
-          <div className="flex flex-col gap-1.5 mb-1">
+          <div className="mode-options grid grid-cols-3 gap-1.5 mb-1">
             {MODES.map((m) => {
               const sel = mode === m.id;
               return (
@@ -114,28 +113,26 @@ export const ModeMenu: React.FC<Props> = ({ bestStars, bestScores, runs, badges,
                   key={m.id}
                   onClick={() => setMode(m.id)}
                   aria-pressed={sel}
-                  className={`text-left rounded-lg border transition-colors flex items-stretch overflow-hidden ${
+                  className={`mode-option text-left rounded-lg border transition-colors flex flex-col overflow-hidden ${
                     sel ? 'border-amber-400/60 bg-amber-500/[0.07]' : 'border-slate-800 bg-slate-900/60 hover:bg-slate-900'
                   }`}
                 >
-                  <span className={`w-1 shrink-0 ${sel ? 'bg-amber-400' : 'bg-slate-800'}`} aria-hidden />
-                  <span className={`w-14 shrink-0 flex items-center justify-center border-r tabular-nums text-lg font-black ${
+                  <span className={`hidden ${sel ? 'bg-amber-400' : 'bg-slate-800'}`} aria-hidden />
+                  <span className={`w-full pt-2 shrink-0 flex items-center justify-center tabular-nums text-lg font-black ${
                     sel ? 'text-amber-300 border-amber-400/25' : 'text-slate-400 border-slate-800'
                   }`}>
                     {MODE_DURATION[m.id]}
                   </span>
-                  <span className="flex-1 px-3 py-2.5 min-w-0">
-                    <span className="flex justify-between items-center gap-2">
+                  <span className="flex-1 px-2 py-2 min-w-0">
+                    <span className="flex flex-col items-start gap-1">
                       <span className={`font-black text-sm tracking-wide ${sel ? 'text-white' : 'text-slate-300'}`}>{m.name}</span>
                       <span className={`text-xs tabular-nums ${sel ? 'text-amber-400' : 'text-slate-400'}`} aria-label={`${bestStars[m.id]} of 3 stars`}>
                         {stars(bestStars[m.id])}
                       </span>
                     </span>
-                    <span className="flex justify-between items-center gap-2 mt-0.5">
-                      <span className="text-slate-400 text-[11px] truncate">{m.desc}</span>
-                      <span className="text-slate-400 text-[10px] tabular-nums shrink-0">
-                        {(bestScores[m.id] ?? 0) > 0 ? `BEST ${(bestScores[m.id] ?? 0).toLocaleString()}` : ''}
-                      </span>
+                    <span className="flex flex-col items-start gap-1 mt-0.5">
+                      <span className="text-slate-400 text-[11px] leading-tight">{m.id === 0 ? "Fast sprint" : m.id === 1 ? "Until dawn" : "Keep surviving"}</span>
+
                     </span>
                   </span>
                 </button>
@@ -143,13 +140,13 @@ export const ModeMenu: React.FC<Props> = ({ bestStars, bestScores, runs, badges,
             })}
           </div>
           {nextStarTarget !== null && (
-            <p className="text-[10px] text-slate-400 tabular-nums mb-3 px-0.5">
+            <p className="star-target text-[10px] text-slate-400 tabular-nums mb-3 px-0.5">
               {nextStarIdx === 0 ? 'FIRST STAR' : `${nextStarIdx + 1}★`} AT {nextStarTarget.toLocaleString()} ON {MODES[mode].name.toUpperCase()}
             </p>
           )}
 
           <SectionLabel>Line check · 1 free</SectionLabel>
-          <div className="grid grid-cols-3 gap-1.5 mb-1">
+          <div className="loadout-options grid grid-cols-1 gap-1.5 mb-1">
             {LOADOUTS.map((l) => {
               const sel = loadout === l.id;
               return (
@@ -157,13 +154,13 @@ export const ModeMenu: React.FC<Props> = ({ bestStars, bestScores, runs, badges,
                   key={l.id}
                   onClick={() => setLoadout(l.id)}
                   aria-pressed={sel}
-                  className={`rounded-lg border p-2.5 text-center transition-colors ${
+                  className={`loadout-option rounded-lg border p-2.5 text-left transition-colors ${
                     sel ? 'border-emerald-400/60 bg-emerald-500/[0.07] text-emerald-300' : 'border-slate-800 bg-slate-900/60 text-slate-400 hover:bg-slate-900'
                   }`}
                 >
-                  <LoadoutIcon id={l.id} className="w-5 h-5 mx-auto" />
-                  <div className={`text-[11px] font-bold mt-1.5 leading-tight ${sel ? 'text-white' : 'text-slate-400'}`}>{l.name}</div>
-                  <div className={`text-[11px] mt-0.5 leading-tight ${sel ? 'text-emerald-300' : 'text-slate-400'}`}>{l.desc}</div>
+                  <LoadoutIcon id={l.id} className="w-6 h-6" />
+                  <div className={`text-sm font-bold leading-tight ${sel ? 'text-white' : 'text-slate-400'}`}>{l.name}</div>
+                  <div className={`text-xs leading-tight ${sel ? 'text-emerald-300' : 'text-slate-400'}`}>{l.desc}</div>
                 </button>
               );
             })}
@@ -171,6 +168,7 @@ export const ModeMenu: React.FC<Props> = ({ bestStars, bestScores, runs, badges,
 
           <WireRule />
 
+          <details className="mt-3"><summary className="text-xs font-bold text-slate-400 cursor-pointer py-2">Shift log & badges · {badges.length}/{BADGES.length}</summary>
           <SectionLabel>Shift log</SectionLabel>
           {runs.length > 0 ? (
             <div className="mb-1">
@@ -210,13 +208,14 @@ export const ModeMenu: React.FC<Props> = ({ bestStars, bestScores, runs, badges,
             })}
           </div>
 
-          <p className="text-xs text-slate-400 text-center mt-5" role="status">{offlineReady ? 'Ready for offline play · no account' : 'Offline play after first download · no account'}</p>
+          </details>
+          <p className="text-xs text-slate-400 text-center mt-3" role="status">{offlineReady ? 'Ready for offline play · no account' : 'Offline play after first download · no account'}</p>
           {needRefresh && <button onClick={onRefresh} className="w-full mt-3 rounded-lg bg-indigo-600 text-white font-bold py-3">Install game update</button>}
         </div>
       </div>
 
       {/* Breaker-switch CTA: pinned in thumb reach */}
-      <div className="absolute bottom-0 inset-x-0 z-10 border-t border-slate-800/80 bg-slate-950/92 backdrop-blur px-4 pt-2.5 pb-[max(0.65rem,env(safe-area-inset-bottom))]">
+      <div className="absolute bottom-0 inset-x-0 z-10 border-t border-slate-800/80 bg-slate-950/92 backdrop-blur px-4 pt-2.5 pb-3">
         <div className="max-w-sm mx-auto">
           <button
             onClick={() => onStart(mode, loadout)}

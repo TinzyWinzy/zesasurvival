@@ -55,8 +55,8 @@ const BG_LAYERS: string[] = [
 
 function gameSize() {
   const width = Math.min(window.innerWidth, MAX_WIDTH);
-  const height = window.innerHeight;
-  return { width: Math.max(200, width), height: Math.max(320, height) };
+  const height = window.visualViewport?.height ?? window.innerHeight;
+  return { width: Math.max(200, width), height: Math.max(1, height) };
 }
 
 function randomOrb(): number {
@@ -172,7 +172,9 @@ export default function App() {
     document.addEventListener('visibilitychange', handleVis);
 
     const handleResize = () => {
-      sizeRef.current = gameSize();
+      const bounds = containerRef.current?.getBoundingClientRect();
+      sizeRef.current = bounds && bounds.width > 0 && bounds.height > 0
+        ? { width: bounds.width, height: bounds.height } : gameSize();
       universeRef.current?.resize(sizeRef.current.width, sizeRef.current.height);
       const canvas = canvasRef.current;
       if (canvas) {
@@ -182,6 +184,10 @@ export default function App() {
       }
     };
     window.addEventListener('resize', handleResize);
+    window.visualViewport?.addEventListener('resize', handleResize);
+    const sizeObserver = new ResizeObserver(handleResize);
+    if (containerRef.current) sizeObserver.observe(containerRef.current);
+    handleResize();
 
     async function start() {
       try {
@@ -493,6 +499,8 @@ export default function App() {
       cancelAnimationFrame(animId);
       document.removeEventListener('visibilitychange', handleVis);
       window.removeEventListener('resize', handleResize);
+      window.visualViewport?.removeEventListener('resize', handleResize);
+      sizeObserver.disconnect();
       try {
         universeRef.current?.free();
       } catch { /* ignore */ }
@@ -615,11 +623,13 @@ export default function App() {
   const handlePointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
     const u = universeRef.current;
     if (!u || !startedRef.current || gameOver || pausedRef.current || loading || loadError) return;
-    e.currentTarget.focus();
+    if (!e.isPrimary) return;
+    e.currentTarget.focus({ preventScroll: true });
     e.currentTarget.setPointerCapture(e.pointerId);
     sfx.unlock();
     const x = canvasX(e.clientX);
     if (!Number.isFinite(x)) return;
+    u.move_player(x);
     if (e.pointerType === 'mouse') {
       commitDrop(x); // desktop: instant
     } else {
@@ -757,8 +767,8 @@ export default function App() {
   const dawnProgress = victory ? 1 : mode === 2 ? wave / 5 : Math.min(1, Math.max(0, 1 - timeLeft / Math.max(1, modeTotal)));
 
   return (
-    <div className="flex justify-center items-center h-screen w-screen bg-slate-950 select-none">
-      <div ref={containerRef} className="relative w-full max-w-[480px] h-full overflow-hidden bg-slate-950 shadow-2xl">
+    <div className="game-shell bg-slate-950 select-none">
+      <div ref={containerRef} className="game-frame relative overflow-hidden bg-slate-950 shadow-2xl">
         {/* Night-to-dawn sky: single layer swapped on wave change (the
             banner + flash + stinger mask the cut; 5 crossfading fullscreen
             layers janked low-end GPUs). */}
@@ -890,7 +900,7 @@ export default function App() {
 
         {/* Non-blocking wave and upgrade announcements */}
         {toasts.length > 0 && (
-          <div className="absolute top-36 left-0 w-full flex flex-col items-center gap-1.5 z-30 pointer-events-none px-4">
+          <div className="game-announcement absolute top-36 left-0 w-full flex flex-col items-center gap-1.5 z-30 pointer-events-none px-4">
             {toasts.slice(-1).map((t) => (
               <div key={t.id} className="bg-slate-950/90 text-amber-200 border border-amber-300/25 px-3 py-1.5 rounded-lg text-center">
                 <div className="text-xs font-black">{t.title}</div>

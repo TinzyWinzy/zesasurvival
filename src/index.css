@@ -15,8 +15,42 @@ body,
 }
 
 canvas {
+  display: block;
   touch-action: none;
   -webkit-tap-highlight-color: transparent;
+}
+
+/* Phone browser chrome and display cutouts stay outside the playable arena. */
+.game-shell {
+  display: flex;
+  justify-content: center;
+  width: 100%;
+  height: 100vh;
+  height: 100dvh;
+  box-sizing: border-box;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right)
+    env(safe-area-inset-bottom) env(safe-area-inset-left);
+}
+.game-frame { width: 100%; max-width: 480px; height: 100%; min-height: 0; }
+.menu-scroll { overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
+.loadout-option { display: grid; grid-template-columns: 28px 1fr; column-gap: 10px; min-height: 56px; }
+.loadout-option svg { grid-row: span 2; align-self: center; }
+.mode-option { min-height: 100px; }
+.mode-option span { max-width: 100%; }
+button, summary { touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
+@media (max-height: 640px) {
+  .menu-content { padding-top: 12px; }
+  .star-target { display: none; }
+}
+@media (pointer: coarse) { .game-frame { max-width: none; } }
+@media (max-height: 500px) and (orientation: landscape) {
+  .game-frame { max-width: none; }
+  .menu-content { max-width: 720px; }
+  .loadout-options { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .game-hud { max-width: 360px; }
+  .game-hud > div:first-child { padding-top: 6px; padding-bottom: 6px; }
+  .game-hud > div:last-child { margin-top: 4px; }
+  .game-announcement { top: 12px; left: auto; right: 8px; width: calc(100% - 380px); padding: 0; }
 }
 
 /* CRT scanline overlay: obsidian grid texture, zero GPU cost. */
