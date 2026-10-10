@@ -11,6 +11,7 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "check": "tsc --noEmit",
+    "test:pwa": "node scripts/test-pwa.mjs",
     "test:integration": "npm run wasm && node scripts/test-game-integration.mjs"
   },
   "dependencies": {

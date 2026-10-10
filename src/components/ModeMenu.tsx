@@ -1,3 +1,4 @@
+import { InstallApp, type useAppInstall } from './InstallApp';
 import React, { useState } from 'react';
 import {
   MODES,
@@ -17,6 +18,7 @@ const LOADOUTS: { id: Loadout; name: string; desc: string }[] = [
 ];
 
 interface Props {
+  appInstall: ReturnType<typeof useAppInstall>;
   bestStars: Record<RunMode, number>;
   bestScores: Record<RunMode, number>;
   runs: RunRecord[];
@@ -62,7 +64,7 @@ const SectionLabel: React.FC<{ children: React.ReactNode }> = ({ children }) => 
 
 const MODE_DURATION: Record<RunMode, string> = { 0: '3:00', 1: '5:00', 2: '∞' };
 
-export const ModeMenu: React.FC<Props> = ({ bestStars, bestScores, runs, badges, offlineReady, needRefresh, onRefresh, onStart }) => {
+export const ModeMenu: React.FC<Props> = ({ appInstall, bestStars, bestScores, runs, badges, offlineReady, needRefresh, onRefresh, onStart }) => {
   const [mode, setMode] = useState<RunMode>(1);
   const [loadout, setLoadout] = useState<Loadout>(1);
 
@@ -82,15 +84,16 @@ export const ModeMenu: React.FC<Props> = ({ bestStars, bestScores, runs, badges,
         <div className="menu-content w-full max-w-sm mx-auto px-4 pt-4 pb-28">
 
           {/* Header: utility-board identity */}
-          <div className="flex items-center gap-3 mb-1">
-            <svg viewBox="0 0 28 32" className="w-7 h-8 text-amber-400 shrink-0" fill="none" aria-hidden>
+          <div className="flex items-center gap-2 mb-1">
+            <svg viewBox="0 0 28 32" className="w-5 h-7 text-amber-400 shrink-0" fill="none" aria-hidden>
               <path d="M14 2 L4 30 M14 2 L24 30 M7 22 H21 M9 16 H19 M11 10 H17" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
               <path d="M14 6 L10 15 H15 L12 24" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" strokeLinecap="round" opacity="0.85" />
             </svg>
-            <div>
-              <h1 className="text-xl font-black text-white tracking-[0.12em] title-glow leading-none">ZESA SURVIVOR</h1>
-              <p className="text-[10px] font-bold uppercase tracking-[0.28em] text-amber-500/80 mt-1">Load-shedding survival</p>
+            <div className="min-w-0 flex-1">
+              <h1 className="text-base font-black text-white tracking-[0.04em] title-glow leading-none">ZESA SURVIVOR</h1>
+              <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-amber-500/80 mt-1">Load-shedding survival</p>
             </div>
+            <InstallApp app={appInstall} offlineReady={offlineReady} />
           </div>
           <p className="text-slate-400 text-[11px] tabular-nums mt-2 mb-1">
             {myBest > 0 ? `LAST BEST · ${MODES[mode].name.toUpperCase()} · ${myBest.toLocaleString()}` : 'HOLD THE GRID UNTIL DAWN'}

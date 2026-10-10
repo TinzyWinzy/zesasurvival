@@ -6,11 +6,13 @@ export const MODES: { id: RunMode; name: string; desc: string; total: number }[]
   { id: 2, name: 'Endless', desc: 'no dawn. how long?', total: 0 }
 ];
 
-// First-pass star bars (tune after playtest data). Score gates per mode.
+// Tuned 10 Oct 2026 against a real Standard best of 348,000 (n=1).
+// 1★ rewards a decent run, 2★ solid play, 3★ sits above the known best so
+// the top star stays a chase. Revisit once a few more players log shifts.
 export const STAR_BARS: Record<RunMode, [number, number, number]> = {
-  0: [5000, 12000, 20000],
-  1: [10000, 25000, 45000],
-  2: [15000, 35000, 60000]
+  0: [15000, 90000, 240000],
+  1: [25000, 150000, 400000],
+  2: [20000, 120000, 350000]
 };
 
 export function starsFor(mode: RunMode, score: number): 0 | 1 | 2 | 3 {
@@ -55,7 +57,7 @@ export interface Badge {
 export const BADGES: Badge[] = [
   { id: 'first-light', name: 'First Light', desc: 'First merge' },
   { id: 'bright-spark', name: 'Bright Spark', desc: 'Combo x3' },
-  { id: 'township-grid', name: 'Township Grid', desc: '10,000 pts in one run' },
+  { id: 'township-grid', name: 'Township Grid', desc: '150,000 pts in one run' },
   { id: 'kariba', name: 'Kariba', desc: 'Reach Level 5' },
   { id: 'survivor', name: 'Survivor', desc: 'Survive 180s' },
   { id: 'dawn', name: 'Dawn Breaker', desc: 'Survive all 5 waves' }
@@ -164,7 +166,7 @@ export function checkBadges(args: {
   const toUnlock: BadgeId[] = [];
   if (args.merges >= 1) toUnlock.push('first-light');
   if (args.combo >= 3) toUnlock.push('bright-spark');
-  if (args.score >= 10000) toUnlock.push('township-grid');
+  if (args.score >= 150000) toUnlock.push('township-grid');
   if (args.level >= 5) toUnlock.push('kariba');
   if (args.seconds >= 180) toUnlock.push('survivor');
   if (args.victory) toUnlock.push('dawn');

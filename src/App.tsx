@@ -1,3 +1,4 @@
+import { useAppInstall } from './components/InstallApp';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import init, { Universe } from '../pkg/zesa_backend.js';
 import { HUD } from './components/HUD';
@@ -16,6 +17,7 @@ import {
   drawBeam,
   drawTelegraph,
   drawEnergy,
+  drawRelay,
   drawArcTick,
   drawMergePulse,
   drawArena
@@ -34,7 +36,7 @@ import {
 const MAX_WIDTH = 480;
 const HUD_SYNC_MS = 250;
 const DROP_COOLDOWN_MS = 250;
-const HEADER_LEN = 33;
+const HEADER_LEN = 34;
 
 const WAVE_BANNERS: Record<number, { title: string; desc: string }> = {
   2: { title: 'WAVE 2 — Escalation', desc: 'Fast strikers from the edges' },
@@ -118,10 +120,14 @@ export default function App() {
   const [timeLeft, setTimeLeft] = useState(300);
   const [runSeconds, setRunSeconds] = useState(0);
   const [gauge, setGauge] = useState(0);
+  const [relayCount, setRelayCount] = useState(0);
+  const [relayArmed, setRelayArmed] = useState(false);
+  const relayArmedRef = useRef(false);
   const pauseDialogRef = useDialogFocus(paused && started && !gameOver);
   const [isOffline, setIsOffline] = useState(
     typeof navigator !== 'undefined' ? !navigator.onLine : false
   );
+  const appInstall = useAppInstall();
   const [needRefresh, setNeedRefresh] = useState(false);
   const [offlineReady, setOfflineReady] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -135,7 +141,7 @@ export default function App() {
   const updateSWRef = useRef<((reload?: boolean) => Promise<void>) | null>(null);
 
   useEffect(() => {
-    const updateSW = setupServiceWorker(() => setNeedRefresh(true), () => setOfflineReady(true));
+    const { updateSW, dispose } = setupServiceWorker(() => setNeedRefresh(true), () => setOfflineReady(true));
     updateSWRef.current = updateSW;
 
     const handleOnline = () => setIsOffline(false);
@@ -143,6 +149,7 @@ export default function App() {
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
     return () => {
+      dispose();
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
     };
@@ -274,6 +281,7 @@ export default function App() {
             const pgauge = copy[23];
             const beamCount = copy[24] | 0;
             const energyCount = copy[25] | 0;
+            const prelayCount = copy[33] | 0;
 
             maxComboRef.current = Math.max(maxComboRef.current, pbest);
             // Clean merge feedback: sound only. Pop + glyph carry the visual.
@@ -316,6 +324,17 @@ export default function App() {
               setLevel(plevel);
             }
 
+            // Audio: one tension value drives the music blend every frame.
+            music.setStakes({
+              wave: pwave,
+              hpRatio: php / Math.max(1, pmaxhp),
+              enemyCount,
+              telegraphCount,
+              timeLeft: ptimeLeft,
+              surge: psurge,
+              freeze: pfreeze
+            });
+
             if (time - lastHudSync > HUD_SYNC_MS || pvictory || universe.is_game_over()) {
               lastHudSync = time;
               if (pgauge > prevGaugeRef.current + 1) sfx.pickup();
@@ -344,6 +363,7 @@ export default function App() {
                 setRunSeconds(Math.round(total - ptimeLeft));
               }
               setGauge(pgauge);
+              setRelayCount(prelayCount);
               if (universe.is_game_over()) setGameOver(true);
             }
 
@@ -446,9 +466,30 @@ export default function App() {
                 drawEnergy(ctx, gex, gey, i * 1.7, visualTime);
               }
 
+              // Friendly relays hold the deck behind the floor line.
+              for (let i = 0; i < prelayCount; i++) {
+                const rx = copy[idx];
+                const ry = copy[idx + 1];
+                const rhp = copy[idx + 2];
+                const rcd = copy[idx + 3];
+                idx += 4;
+                drawRelay(ctx, rx, ry, rhp, rcd, visualTime);
+              }
+
               // Aim preview: ghost lane for touch players (hold, aim, release).
               const aim = aimRef.current;
-              if (aim.active) {
+              if (aim.active && relayArmedRef.current) {
+                ctx.save();
+                ctx.setLineDash([6, 6]);
+                ctx.strokeStyle = 'rgba(34,211,238,0.75)';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.moveTo(aim.x, 30);
+                ctx.lineTo(aim.x, h - 100);
+                ctx.stroke();
+                ctx.strokeRect(aim.x - 12, h - 100 - 24, 24, 24);
+                ctx.restore();
+              } else if (aim.active) {
                 const gr = 12 + aim.level * 6;
                 const gc = aim.charged ? '#4ADE80' : ORB_COLORS[aim.level] || '#fff';
                 ctx.save();
@@ -512,7 +553,6 @@ export default function App() {
   useEffect(() => {
     if (!gameOver || gameOverSavedRef.current) return;
     gameOverSavedRef.current = true;
-    music.stop();
     const u = universeRef.current;
     const merges = u ? u.get_merge_count() : mergesRef.current;
     const finalWave = u?.get_wave() ?? waveRef.current;
@@ -551,7 +591,16 @@ export default function App() {
       checkBadges({ merges, combo: maxComboRef.current, score: finalScore, level: finalLevel, seconds, victory: won })
     );
     setBadges(loadBadges());
-    if (won) sfx.victory(); else sfx.over();
+    // Dawn resolves to a sustained major chord; a loss decays to the drone.
+    if (won) {
+      music.setPhase('victory');
+      music.stop(4.5);
+      sfx.victory();
+    } else {
+      music.setPhase('over');
+      music.stop(2.2);
+      sfx.over();
+    }
   }, [gameOver, victory, score, level]);
 
   // Refresh/close mid-run: save the partial shift so nothing is lost.
@@ -603,6 +652,13 @@ export default function App() {
   const commitDrop = (x: number) => {
     const u = universeRef.current;
     if (!u || !startedRef.current || pausedRef.current || u.is_game_over() || u.is_victory()) return;
+    // Armed placement is a deliberate spend: it never also drops a cell.
+    if (relayArmedRef.current) {
+      relayArmedRef.current = false;
+      setRelayArmed(false);
+      if (u.deploy_relay(x)) sfx.relay();
+      return;
+    }
     const now = performance.now();
     if (now - lastDropRef.current < DROP_COOLDOWN_MS) return;
     lastDropRef.current = now;
@@ -668,10 +724,25 @@ export default function App() {
     });
   }, []);
 
+  // Music ducks and closes its filter while paused, restores on resume.
+  useEffect(() => {
+    if (!started) return;
+    if (gameOver) return; // end-of-run phase is owned by the save effect
+    music.setPhase(paused ? 'pause' : 'run');
+  }, [paused, started, gameOver]);
+
   const toggleMute = useCallback(() => {
     setMuted((m) => {
       sfx.setMuted(!m);
       return !m;
+    });
+  }, []);
+
+  const toggleRelay = useCallback(() => {
+    sfx.unlock();
+    setRelayArmed((a) => {
+      relayArmedRef.current = !a;
+      return !a;
     });
   }, []);
 
@@ -686,6 +757,9 @@ export default function App() {
     prevHpRef.current = 100;
     pausedMsRef.current = 0;
     aimRef.current = { active: false, x: 0, level: 1, charged: false };
+    relayArmedRef.current = false;
+    setRelayArmed(false);
+    setRelayCount(0);
     pausedRef.current = false;
     ownedUpgradesRef.current.clear();
     accumulatorRef.current = 0;
@@ -754,7 +828,7 @@ export default function App() {
   }, []);
 
   const handleMenu = useCallback(() => {
-    music.stop();
+    music.stop(0.8);
     startedRef.current = false;
     setStarted(false);
     setGameOver(false);
@@ -877,6 +951,30 @@ export default function App() {
           </div>
         )}
 
+        {/* Relay deployment: arms a placement instead of the next cell drop. */}
+        {started && !gameOver && !loading && !loadError && (
+          <div className="absolute bottom-4 left-4 z-30">
+            <button
+              onClick={toggleRelay}
+              aria-pressed={relayArmed}
+              aria-label={
+                relayArmed
+                  ? 'Cancel relay placement'
+                  : `Deploy relay, ${relayCount} of 2 placed, costs 60 charge`
+              }
+              disabled={!relayArmed && (gauge < 60 || relayCount >= 2)}
+              className={`w-11 h-11 rounded-full border shadow-xl leading-none flex flex-col items-center justify-center ${
+                relayArmed
+                  ? 'bg-cyan-300 border-cyan-100 text-slate-950'
+                  : 'bg-slate-800/85 border-slate-600 text-cyan-200'
+              } disabled:opacity-30 disabled:cursor-not-allowed`}
+            >
+              <span className="text-[13px] leading-none" aria-hidden>⚡</span>
+              <span className="text-[9px] font-black leading-none mt-0.5">{relayCount}/2</span>
+            </button>
+          </div>
+        )}
+
         {paused && started && !gameOver && (
           <div ref={pauseDialogRef} className="absolute inset-0 overflow-y-auto z-40 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-6" role="dialog" aria-modal="true" aria-label="Paused">
             <div className="text-center">
@@ -930,6 +1028,7 @@ export default function App() {
 
         {!started && !loading && !loadError && (
           <ModeMenu
+            appInstall={appInstall}
             bestStars={highs.bestStars}
             bestScores={highs.bestScores}
             runs={highs.runs}

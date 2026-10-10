@@ -10,10 +10,15 @@ export default defineConfig({
     wasm(),
     VitePWA({
       registerType: 'prompt',
-      includeAssets: ['favicon.svg', 'apple-touch-icon.svg', 'masked-icon.svg'],
+      includeAssets: ['favicon.svg', 'apple-touch-icon.png', 'masked-icon.svg'],
       manifest: {
         name: 'ZESA Survivor: Physics Horde',
         short_name: 'ZESA Survivor',
+        id: '/',
+        start_url: '/',
+        scope: '/',
+        lang: 'en',
+        categories: ['games', 'entertainment'],
         description: 'Offline-first Suika Physics Merge + Horde Survival Action PWA',
         theme_color: '#0f172a',
         background_color: '#0f172a',
@@ -21,25 +26,27 @@ export default defineConfig({
         orientation: 'portrait',
         icons: [
           {
-            src: 'pwa-192x192.svg',
+            src: 'pwa-192x192.png',
             sizes: '192x192',
-            type: 'image/svg+xml'
+            type: 'image/png',
+            purpose: 'any'
           },
           {
-            src: 'pwa-512x512.svg',
+            src: 'pwa-512x512.png',
             sizes: '512x512',
-            type: 'image/svg+xml'
+            type: 'image/png',
+            purpose: 'any'
           },
           {
-            src: 'masked-icon.svg',
+            src: 'pwa-maskable.png',
             sizes: '512x512',
-            type: 'image/svg+xml',
+            type: 'image/png',
             purpose: 'maskable'
           }
         ]
       },
       workbox: {
-        globPatterns: ['**/*.{js,css,html,wasm,svg,json}'],
+        globPatterns: ['**/*.{js,css,html,wasm,svg,png,json,webmanifest}'],
         navigateFallback: 'index.html',
         runtimeCaching: [
           {

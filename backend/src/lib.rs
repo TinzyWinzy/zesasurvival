@@ -67,12 +67,32 @@ pub struct Energy {
     pub life: f32,
 }
 
+#[derive(Clone, Debug)]
+pub struct Relay {
+    pub id: u64,
+    pub x: f32,
+    pub y: f32,
+    pub hp: f32,
+    pub max_hp: f32,
+    pub cooldown: f32,
+}
+
 const BEAM_LIFE: f32 = 0.25;
 const BEAM_HALF_WIDTH: f32 = 30.0;
 const ENERGY_GAUGE_MAX: f32 = 100.0;
 const ENERGY_PER_CELL: f32 = 10.0;
 const MAX_ENERGY_CELLS: usize = 40;
 const MAX_BEAMS: usize = 6;
+// Friendly relays: a gauge sink for sustained fire. Static, breakable.
+const RELAY_COST: f32 = 60.0;
+const MAX_RELAYS: usize = 2;
+const RELAY_RANGE: f32 = 220.0;
+const RELAY_FIRE_INTERVAL: f32 = 1.5;
+const RELAY_DAMAGE: f32 = 18.0;
+const RELAY_BEAM_HALF_WIDTH: f32 = 18.0;
+const RELAY_HP: f32 = 40.0;
+const RELAY_RADIUS: f32 = 12.0;
+const RELAY_TOUCH_DPS: f32 = 16.0;
 
 /// Regulatory-style pity engine: variable-ratio drops with a hard
 /// guarantee rail — no dry run longer than threshold-1 kills.
@@ -195,6 +215,7 @@ pub struct Universe {
     telegraphs: Vec<Telegraph>,
     beams: Vec<Beam>,
     energies: Vec<Energy>,
+    relays: Vec<Relay>,
     gauge: f32,
     pity: MercyPityEngine,
     next_id: u64,
@@ -270,6 +291,7 @@ impl Universe {
             telegraphs: Vec::new(),
             beams: Vec::new(),
             energies: Vec::new(),
+            relays: Vec::new(),
             gauge: 0.0,
             pity: MercyPityEngine::new(5, 0.8),
             next_id: 1,
@@ -334,6 +356,37 @@ impl Universe {
         self.gauge
     }
 
+    /// Deploy a friendly relay onto the cell floor. Costs a chunk of the
+    /// gauge — the alternative spend is a charged level-4 drop — and caps at
+    /// two. Relays pick off the nearest enemy in range on a fixed cadence and
+    /// grind down if enemies reach them.
+    pub fn deploy_relay(&mut self, x: f32) -> bool {
+        if self.game_over || self.victory {
+            return false;
+        }
+        if self.gauge < RELAY_COST || self.relays.len() >= MAX_RELAYS {
+            return false;
+        }
+        let x = if x.is_finite() { x } else { self.width * 0.5 };
+        let x = x.clamp(RELAY_RADIUS, (self.width - RELAY_RADIUS).max(RELAY_RADIUS));
+        self.gauge -= RELAY_COST;
+        self.relays.push(Relay {
+            id: self.next_id,
+            x,
+            y: self.height - 100.0 - RELAY_RADIUS,
+            hp: RELAY_HP,
+            max_hp: RELAY_HP,
+            // Brief arm delay so a fresh relay doesn't fire on the same tick.
+            cooldown: 0.5,
+        });
+        self.next_id += 1;
+        true
+    }
+
+    pub fn get_relay_count(&self) -> usize {
+        self.relays.len()
+    }
+
     pub fn get_player_x(&self) -> f32 { self.player_x }
 
     pub fn resize(&mut self, width: f32, height: f32) {
@@ -353,6 +406,7 @@ impl Universe {
             beam.x1 *= sx; beam.x2 *= sx; beam.y1 *= sy; beam.y2 *= sy;
         }
         for energy in &mut self.energies { energy.x *= sx; energy.y *= sy; }
+        for relay in &mut self.relays { relay.x *= sx; relay.y *= sy; }
         self.width = width;
         self.height = height;
     }
@@ -703,6 +757,64 @@ impl Universe {
             }
         }
         let _ = INVULN_SECONDS;
+
+        // 4b. Friendly relays: grind under contact, then fire on the nearest
+        // enemy in range. Collected first so relay kills still drop energy.
+        let mut relay_shots: Vec<(f32, f32, f32, f32)> = Vec::new();
+        for relay in self.relays.iter_mut() {
+            for enemy in self.enemies.iter() {
+                let dx = enemy.x - relay.x;
+                let dy = enemy.y - relay.y;
+                let touch = enemy.radius + RELAY_RADIUS;
+                if dx * dx + dy * dy <= touch * touch {
+                    relay.hp -= RELAY_TOUCH_DPS * dt;
+                }
+            }
+            if relay.hp <= 0.0 {
+                continue;
+            }
+            relay.cooldown -= dt;
+            if relay.cooldown > 0.0 {
+                continue;
+            }
+            let mut best: Option<(f32, f32, f32)> = None; // (dist_sq, x, y)
+            for enemy in self.enemies.iter() {
+                if enemy.hp <= 0.0 {
+                    continue;
+                }
+                let dx = enemy.x - relay.x;
+                let dy = enemy.y - relay.y;
+                let d2 = dx * dx + dy * dy;
+                if d2 > RELAY_RANGE * RELAY_RANGE {
+                    continue;
+                }
+                if best.map_or(true, |(bd, _, _)| d2 < bd) {
+                    best = Some((d2, enemy.x, enemy.y));
+                }
+            }
+            if let Some((_, ex, ey)) = best {
+                relay.cooldown = RELAY_FIRE_INTERVAL;
+                relay_shots.push((relay.x, relay.y, ex, ey));
+            }
+        }
+        self.relays.retain(|r| r.hp > 0.0);
+        for (x1, y1, x2, y2) in relay_shots {
+            for enemy in self.enemies.iter_mut() {
+                if seg_dist(enemy.x, enemy.y, x1, y1, x2, y2) <= RELAY_BEAM_HALF_WIDTH {
+                    enemy.hp -= RELAY_DAMAGE;
+                }
+            }
+            if self.beams.len() < MAX_BEAMS {
+                self.beams.push(Beam {
+                    x1,
+                    y1,
+                    x2,
+                    y2,
+                    life: BEAM_LIFE,
+                    max_life: BEAM_LIFE,
+                });
+            }
+        }
 
         // P2: kills drop harvestable energy cells via pity engine.
         let mut dead_pos = Vec::new();
@@ -1062,20 +1174,21 @@ impl Universe {
         }
     }
 
-    /// Packed render data. Header (33 floats, append-only; 0..16 stable):
+    /// Packed render data. Header (34 floats, append-only; 0..16 stable):
     /// [orb_count, enemy_count, particle_count, player_x, player_y,
     ///  player_hp, player_max_hp, score, level, xp, next_xp,
     ///  combo, combo_frac, best_combo, pending_choices, surge_left, freeze_left,
     ///  wave, time_left, victory, telegraph_count, merge_count,
     ///  last_merge_tier, gauge, beam_count, energy_count,
     ///  beam_width_mult, multi_shot_chance, cryo_nova, chain_lightning,
-    ///  plasma_shield, overclock_speed, magnet_radius_mult]
+    ///  plasma_shield, overclock_speed, magnet_radius_mult, relay_count]
     /// Orbs: x, y, level, radius (4 each)
     /// Enemies: x, y, hp_percent, kind (4 each)
     /// Particles: x, y, life_percent, color_tier (4 each)
     /// Telegraphs: x, y, warn_frac (3 each)
     /// Beams: x1, y1, x2, y2, life_frac (5 each)
     /// Energies: x, y (2 each)
+    /// Relays: x, y, hp_percent, cooldown_frac (4 each)
     ///
     /// NOTE: pointer is only valid until the next &mut call or
     /// memory.grow. Callers must copy the slice immediately and must
@@ -1116,6 +1229,7 @@ impl Universe {
         self.render_buffer.push(if self.plasma_shield { 1.0 } else { 0.0 });
         self.render_buffer.push(self.overclock_speed);
         self.render_buffer.push(self.magnet_radius_mult);
+        self.render_buffer.push(self.relays.len() as f32);
 
         for orb in &self.orbs {
             self.render_buffer.push(orb.x);
@@ -1155,6 +1269,13 @@ impl Universe {
         for e in &self.energies {
             self.render_buffer.push(e.x);
             self.render_buffer.push(e.y);
+        }
+
+        for r in &self.relays {
+            self.render_buffer.push(r.x);
+            self.render_buffer.push(r.y);
+            self.render_buffer.push((r.hp / r.max_hp).clamp(0.0, 1.0));
+            self.render_buffer.push((r.cooldown.max(0.0) / RELAY_FIRE_INTERVAL).clamp(0.0, 1.0));
         }
 
         self.render_buffer.as_ptr()
@@ -1547,6 +1668,77 @@ mod tests {
         u.orbs[0].y = 300.0; u.orbs[1].y = 300.0; u.orbs[0].vx = 4000.0;
         u.tick(0.05);
         assert_eq!(u.merge_count, 1);
+    }
+
+    #[test]
+    fn relay_costs_gauge_and_respects_the_cap() {
+        let mut u = Universe::new(480.0, 800.0);
+        u.gauge = 100.0;
+        assert!(u.deploy_relay(100.0));
+        assert!((u.gauge - 40.0).abs() < 0.01);
+        assert_eq!(u.get_relay_count(), 1);
+        u.gauge = 100.0;
+        assert!(u.deploy_relay(200.0));
+        // Third is refused: the cap holds even with gauge to spare.
+        u.gauge = 100.0;
+        assert!(!u.deploy_relay(300.0));
+        assert_eq!(u.get_relay_count(), 2);
+        // Broke: no relay.
+        u.relays.clear();
+        u.gauge = 0.0;
+        assert!(!u.deploy_relay(100.0));
+        assert_eq!(u.get_relay_count(), 0);
+    }
+
+    #[test]
+    fn relay_sits_on_the_cell_deck() {
+        let mut u = Universe::new(480.0, 800.0);
+        u.gauge = 60.0;
+        assert!(u.deploy_relay(240.0));
+        assert_eq!(u.relays[0].x, 240.0);
+        assert_eq!(u.relays[0].y, 800.0 - 100.0 - RELAY_RADIUS);
+    }
+
+    #[test]
+    fn relay_fires_on_the_nearest_enemy_in_range() {
+        let mut u = Universe::new(480.0, 800.0);
+        u.gauge = 60.0;
+        assert!(u.deploy_relay(240.0));
+        // Two targets: the near one (240,550, dist 138) must take the shot,
+        // not the far one (400,600, dist ~183, clear of the beam lane).
+        for (id, x, y) in [(1u64, 240.0, 550.0), (2, 400.0, 600.0)] {
+            u.enemies.push(Enemy {
+                id, x, y, vx: 0.0, vy: 0.0,
+                hp: 1000.0, max_hp: 1000.0, radius: 10.0, speed: 0.0,
+                kind: 0, frozen_until: 0.0,
+            });
+        }
+        for _ in 0..15 { u.tick(0.05); } // clear the 0.5s arm delay
+        assert!(u.enemies[0].hp < 1000.0);
+        assert_eq!(u.enemies[1].hp, 1000.0);
+        // Out of range: nothing to shoot, so it stays ready and tries again.
+        u.relays[0].cooldown = 0.0;
+        u.enemies[0].x = 2000.0;
+        u.enemies[1].x = 2000.0;
+        let hp_before = u.enemies[0].hp;
+        u.tick(0.05);
+        assert!(u.relays[0].cooldown <= 0.0);
+        assert_eq!(u.enemies[0].hp, hp_before);
+    }
+
+    #[test]
+    fn relay_grinds_down_under_enemy_contact() {
+        let mut u = Universe::new(480.0, 800.0);
+        u.gauge = 60.0;
+        assert!(u.deploy_relay(240.0));
+        let ry = u.relays[0].y;
+        u.enemies.push(Enemy {
+            id: 9, x: 240.0, y: ry, vx: 0.0, vy: 0.0,
+            hp: 1000.0, max_hp: 1000.0, radius: 10.0, speed: 0.0,
+            kind: 0, frozen_until: 0.0,
+        });
+        for _ in 0..200 { u.tick(0.05); }
+        assert_eq!(u.get_relay_count(), 0);
     }
 
 }

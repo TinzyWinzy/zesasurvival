@@ -39,7 +39,7 @@ canvas {
 .mode-option span { max-width: 100%; }
 button, summary { touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
 @media (max-height: 640px) {
-  .menu-content { padding-top: 12px; }
+  .menu-content { padding-top: 8px; }
   .star-target { display: none; }
 }
 @media (pointer: coarse) { .game-frame { max-width: none; } }

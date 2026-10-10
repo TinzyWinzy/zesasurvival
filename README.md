@@ -14,7 +14,7 @@ costs nothing in server compute.
 | Game logic | Rust → WebAssembly (`wasm-bindgen` 0.2.92)        |
 | UI         | React 18 + TypeScript + Vite                      |
 | Styling    | Tailwind CSS                                      |
-| Audio      | WebAudio synth (no asset files)                   |
+| Audio      | WebAudio synth (no asset files); 432 Hz base, tension-blended |
 | Sprites    | Procedural Canvas 2D (no image assets)            |
 | PWA        | vite-plugin-pwa (workbox, offline precache)       |
 | Deploy     | Vercel via GitHub Actions                         |
@@ -48,6 +48,10 @@ cargo test --manifest-path backend/Cargo.toml
   CI workflow. Bumping it requires rebuilding `pkg/` locally.
 - **Continuous level-ups.** Each earned upgrade installs automatically, with a
   brief non-blocking notification. Gameplay and input continue without a pause.
+- **Adaptive music.** `music.setStakes()` is called every frame with wave, HP,
+  enemy pressure and time remaining. Those blend into one tension value that
+  drives layer gains, lowpass cutoff and tempo (96–126 BPM) — no hard cuts on
+  wave boundaries. Pause ducks the bed; dawn resolves minor → major.
 
 ## Deploy
 
@@ -58,3 +62,9 @@ repository secrets: `VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID`.
 ---
 
 MIT.
+
+## Install on your phone
+
+Tap **Install app** in the menu. Supported browsers show their native install prompt; other browsers show home-screen instructions. On iPhone/iPad, open Safari, choose Share → Add to Home Screen → Add. Launch from the home-screen icon for the standalone game. Wait for **Ready for offline play** before going offline. Scores and badges remain on the device. Updates are offered in the menu and never reload a run automatically.
+
+`npm run test:pwa` checks the generated manifest, PNG icon dimensions, Apple icon and offline precache after a production build.

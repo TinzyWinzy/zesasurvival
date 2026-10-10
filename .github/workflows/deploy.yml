@@ -48,7 +48,9 @@ jobs:
         run: npm run build
 
       - name: Verify WASM integration
-        run: node scripts/test-game-integration.mjs
+        run: |
+          node scripts/test-game-integration.mjs
+          npm run test:pwa
 
       - name: Install Vercel CLI
         run: npm install --global vercel@latest

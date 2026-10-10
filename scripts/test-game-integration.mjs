@@ -10,7 +10,7 @@ const headerLength = Number(app.match(/const HEADER_LEN = (\d+)/)[1]);
 const frame = (u) => {
   const pointer = u.get_render_data();
   const data = Float32Array.from(new Float32Array(wasm.memory.buffer, pointer, u.get_render_data_len()));
-  assert.equal(data.length, headerLength + data[0] * 4 + data[1] * 4 + data[2] * 4 + data[20] * 3 + data[24] * 5 + data[25] * 2);
+  assert.equal(data.length, headerLength + data[0] * 4 + data[1] * 4 + data[2] * 4 + data[20] * 3 + data[24] * 5 + data[25] * 2 + data[33] * 4);
   return data;
 };
 const u = new Universe(480, 800);
@@ -26,7 +26,7 @@ data = frame(u);
 assert.equal(data[22], 3);
 assert.ok(data[24] > 0, 'A merge must produce a correctly indexed beam');
 assert.ok(data[2] > 0, 'Merge particle records must be included in the frame');
-for (const [name, index] of [['pgauge', 23], ['beamCount', 24], ['energyCount', 25]]) {
+  for (const [name, index] of [['pgauge', 23], ['beamCount', 24], ['energyCount', 25], ['prelayCount', 33]]) {
   assert.match(app, new RegExp(`const ${name} = copy\\[${index}\\]`));
 }
 for (let i = 0; i < 500; i++) { u.tick(1 / 60); frame(u); }
@@ -34,6 +34,13 @@ u.resize(320, 600);
 assert.ok(u.get_player_x() <= 300);
 assert.equal(frame(u)[4], 528);
 u.free();
+
+// Relays: gauge sink is exported, refuses when broke, and the ABI carries the count.
+const relayWorld = new Universe(480, 800);
+assert.equal(typeof relayWorld.deploy_relay, 'function');
+assert.equal(relayWorld.deploy_relay(240), false, 'broke: deployment must refuse');
+assert.equal(frame(relayWorld)[33], 0);
+relayWorld.free();
 
 // Run the actual card generator against the compiled WASM engine.
 const temporary = new URL('./.upgrade-test.mjs', import.meta.url);
@@ -60,4 +67,4 @@ try {
 } finally {
   unlinkSync(fileURLToPath(temporary));
 }
-console.log('Game integration passed: render ABI, entity frames, resizing, all upgrade cards, and duplicate filtering.');
+console.log('Game integration passed: render ABI, entity frames, resizing, relays, all upgrade cards, and duplicate filtering.');

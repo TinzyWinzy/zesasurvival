@@ -37,7 +37,7 @@ export const GameOverModal: React.FC<GameOverModalProps> = ({ score, level, wave
   const handleShare = async () => {
     const starTxt = stars > 0 ? ` ${starRow(stars)}` : '';
     const text = victory
-      ? `🌅 I HELD UNTIL DAWN in ZESA Survivor (${modeName})!${starTxt} ${fmtTime(seconds)} · Wave 5/5 · Score ${score.toLocaleString()}. Beat my grid: ${window.location.href}`
+      ? `🌅 Magetsi awuya! I held the grid until dawn in ZESA Survivor (${modeName})!${starTxt} ${fmtTime(seconds)} · Wave 5/5 · Score ${score.toLocaleString()}. Beat my grid: ${window.location.href}`
       : `⚡ ZESA Survivor (${modeName})${starTxt}: ${fmtTime(seconds)}, Wave ${wave}/5, Level ${level}, ${score.toLocaleString()} pts! Play 100% offline: ${window.location.href}`;
     setShareFailed(false);
     try {
@@ -74,7 +74,7 @@ export const GameOverModal: React.FC<GameOverModalProps> = ({ score, level, wave
       <div className="bg-slate-900 border border-slate-800 p-6 rounded-2xl max-w-sm w-full text-center shadow-2xl">
         <div className="text-4xl mb-2" aria-hidden>{victory ? '🌅' : '💥'}</div>
         <h2 className={`text-2xl font-black mb-1 ${victory ? 'text-amber-400' : 'text-red-500'}`}>
-          {victory ? 'HELD UNTIL DAWN' : 'GRID OVERLOAD'}
+          {victory ? 'MAGETSI AWUYA!' : 'GRID OVERLOAD'}
         </h2>
         <p className="text-slate-400 text-sm mb-6">
           {victory ? 'The township wakes with power. Legendary shift.' : 'Your battery ran out of juice!'}

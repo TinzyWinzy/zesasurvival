@@ -306,3 +306,56 @@ export function drawArcTick(
   ctx.lineWidth = 1.5;
   ctx.stroke();
 }
+
+/**
+ * Friendly relay: a cyan substation pylon on the cell deck. The ring shows
+ * range, the arc fills as it readies its next shot, and damage dims the core.
+ */
+export function drawRelay(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  hpFrac: number,
+  cooldownFrac: number,
+  t: number
+) {
+  const hp = Math.max(0, Math.min(1, hpFrac));
+  const ready = Math.max(0, Math.min(1, cooldownFrac));
+  const r = 12;
+  ctx.save();
+
+  ctx.strokeStyle = `rgba(34,211,238,${0.1 + 0.07 * Math.sin(t * 0.004)})`;
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.arc(x, y, 26 + Math.sin(t * 0.004) * 2, 0, TAU);
+  ctx.stroke();
+
+  ctx.fillStyle = '#062028';
+  ctx.strokeStyle = '#22D3EE';
+  ctx.lineWidth = 2;
+  poly(ctx, x, y, r, 6, 0);
+  ctx.fill();
+  ctx.stroke();
+
+  // Crossarm insulators.
+  ctx.beginPath();
+  ctx.moveTo(x - r * 0.5, y - r * 0.3);
+  ctx.lineTo(x + r * 0.5, y - r * 0.3);
+  ctx.moveTo(x - r * 0.62, y + r * 0.2);
+  ctx.lineTo(x + r * 0.62, y + r * 0.2);
+  ctx.stroke();
+
+  ctx.strokeStyle = 'rgba(34,211,238,0.9)';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.arc(x, y, r + 4, -Math.PI / 2, -Math.PI / 2 + ready * TAU);
+  ctx.stroke();
+
+  if (hp < 1) {
+    ctx.fillStyle = `rgba(2,6,23,${0.55 * (1 - hp)})`;
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, TAU);
+    ctx.fill();
+  }
+  ctx.restore();
+}
