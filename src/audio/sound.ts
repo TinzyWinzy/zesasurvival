@@ -112,6 +112,12 @@ class Sfx {
     this.tone(hz(1320), 0.08, 'sine', 0.2, hz(880), 0.04);
   }
 
+  /** Copper cut: descending theft sting when a cable thief first shows. */
+  thief() {
+    this.tone(hz(600), 0.14, 'sawtooth', 0.3, hz(180));
+    this.tone(hz(900), 0.1, 'square', 0.15, hz(300), 0.05);
+  }
+
   /** A major arpeggio — the Picardy third that resolves the minor bed. */
   victory() {
     [440, 554.37, 659.25, 880].forEach((f, i) =>

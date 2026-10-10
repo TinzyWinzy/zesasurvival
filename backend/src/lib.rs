@@ -37,7 +37,7 @@ pub struct Enemy {
     pub max_hp: f32,
     pub radius: f32,
     pub speed: f32,
-    pub kind: u8, // 0=grunt, 1=striker, 2=tank, 3=elite, 4=overlord
+    pub kind: u8, // 0=grunt, 1=striker, 2=tank, 3=elite, 4=overlord, 5=cable thief
     pub frozen_until: f32,
 }
 
@@ -86,6 +86,10 @@ const MAX_BEAMS: usize = 6;
 // Friendly relays: a gauge sink for sustained fire. Static, breakable.
 const RELAY_COST: f32 = 60.0;
 const MAX_RELAYS: usize = 2;
+const MAX_THIEVES: usize = 2;
+// Cable thief: clamps onto the battery and siphons stored charge.
+const THIEF_KIND: u8 = 5;
+const THIEF_SIPHON_DPS: f32 = 8.0;
 const RELAY_RANGE: f32 = 220.0;
 const RELAY_FIRE_INTERVAL: f32 = 1.5;
 const RELAY_DAMAGE: f32 = 18.0;
@@ -548,6 +552,66 @@ impl Universe {
         ((self.run_time / self.wave_len) as u32 + 1).min(5).max(1)
     }
 
+    /// Spawn mix by wave. Cable thieves appear from wave 3 and are capped —
+    /// at most two on the field (live + incoming), extras downgrade to grunts.
+    fn roll_spawn_kind(&self, roll: f32, interval: u64) -> u8 {
+        let kind = match self.wave {
+            1 => 0,
+            2 => {
+                if roll < 0.7 { 0 } else { 1 }
+            }
+            3 => {
+                if roll < 0.5 {
+                    0
+                } else if roll < 0.75 {
+                    1
+                } else if roll < 0.9 {
+                    2
+                } else {
+                    5
+                }
+            }
+            4 => {
+                if roll < 0.35 {
+                    0
+                } else if roll < 0.6 {
+                    1
+                } else if roll < 0.8 {
+                    2
+                } else if roll < 0.9 {
+                    3
+                } else {
+                    5
+                }
+            }
+            _ => {
+                if self.frame_count % (interval * 5) == 0 {
+                    4
+                } else if roll < 0.35 {
+                    0
+                } else if roll < 0.6 {
+                    1
+                } else if roll < 0.8 {
+                    2
+                } else if roll < 0.9 {
+                    3
+                } else if roll < 0.95 {
+                    5
+                } else {
+                    4
+                }
+            }
+        };
+        if kind == THIEF_KIND {
+            let thieves = self.enemies.iter().filter(|e| e.kind == THIEF_KIND).count()
+                + self.telegraphs.iter().filter(|t| t.kind == THIEF_KIND).count();
+            if thieves >= MAX_THIEVES {
+                return 0;
+            }
+        }
+        kind
+    }
+
     /// Endless overtime: minutes past 300s feed compounding pressure.
     fn overtime_mins(&self) -> f32 {
         ((self.run_time - WIN_TIME) / 60.0).max(0.0)
@@ -630,6 +694,7 @@ impl Universe {
                 2 => (3.0, 0.55, 16.0), // tank
                 3 => (6.0, 0.8, 14.0),  // elite
                 4 => (25.0, 0.5, 26.0), // overlord
+                5 => (0.5, 1.9, 8.0),   // cable thief: fast, fragile
                 _ => (1.0, 1.0, 10.0),  // grunt
             };
             if kind == 4 && self.enemies.iter().filter(|e| e.kind == 4).count() >= 3 {
@@ -686,41 +751,7 @@ impl Universe {
                 (self.width - 10.0, self.rand01(13) * self.height * 0.6)
             };
             let roll = self.rand01(29);
-            let kind: u8 = match self.wave {
-                1 => 0,
-                2 => {
-                    if roll < 0.7 { 0 } else { 1 }
-                }
-                3 => {
-                    if roll < 0.5 { 0 } else if roll < 0.75 { 1 } else { 2 }
-                }
-                4 => {
-                    if roll < 0.4 {
-                        0
-                    } else if roll < 0.65 {
-                        1
-                    } else if roll < 0.9 {
-                        2
-                    } else {
-                        3
-                    }
-                }
-                _ => {
-                    if self.frame_count % (interval * 5) == 0 {
-                        4
-                    } else if roll < 0.35 {
-                        0
-                    } else if roll < 0.6 {
-                        1
-                    } else if roll < 0.8 {
-                        2
-                    } else if roll < 0.95 {
-                        3
-                    } else {
-                        4
-                    }
-                }
-            };
+            let kind = self.roll_spawn_kind(roll, interval);
             self.telegraphs.push(Telegraph { x: ex, y: ey, kind, timer: TELEGRAPH_TIME });
         }
 
@@ -735,6 +766,7 @@ impl Universe {
         let py = self.player_y;
         let freeze_mult = if self.freeze_timer > 0.0 { 0.6 } else { 1.0 };
         let mut touching = 0u32;
+        let mut thieves_touching = 0u32;
         for enemy in self.enemies.iter_mut() {
             let dx = px - enemy.x;
             let dy = py - enemy.y;
@@ -747,6 +779,9 @@ impl Universe {
 
             if dist < enemy.radius + 15.0 {
                 touching += 1;
+                if enemy.kind == THIEF_KIND {
+                    thieves_touching += 1;
+                }
             }
         }
 
@@ -758,6 +793,10 @@ impl Universe {
                 self.player_hp = 0.0;
                 self.game_over = true;
             }
+        }
+        // Cable thieves siphon stored charge while clamped on — gauge, not HP.
+        if thieves_touching > 0 {
+            self.gauge = (self.gauge - THIEF_SIPHON_DPS * thieves_touching as f32 * dt).max(0.0);
         }
         let _ = INVULN_SECONDS;
 
@@ -1749,6 +1788,69 @@ mod tests {
         u.tick(0.05);
         assert!(u.relays[0].cooldown <= 0.0);
         assert_eq!(u.enemies[0].hp, hp_before);
+    }
+
+    #[test]
+    fn thief_materializes_fast_and_fragile() {
+        let mut u = Universe::new(480.0, 800.0);
+        u.telegraphs.push(Telegraph { x: 240.0, y: 100.0, kind: 5, timer: 0.0 });
+        for _ in 0..5 { u.tick(0.05); }
+        assert_eq!(u.enemies.len(), 1);
+        let t = &u.enemies[0];
+        assert_eq!(t.kind, 5);
+        assert_eq!(t.radius, 8.0);
+        // Level 1 base: hp (12+3)*0.5, speed (48+2.5)*1.9.
+        assert!((t.hp - 7.5).abs() < 0.01);
+        assert!((t.speed - 95.95).abs() < 0.1);
+    }
+
+    #[test]
+    fn thief_siphons_gauge_on_contact_and_floors_at_zero() {
+        let mut u = Universe::new(480.0, 800.0);
+        u.gauge = 50.0;
+        u.enemies.push(Enemy {
+            id: 1, x: u.player_x, y: u.player_y, vx: 0.0, vy: 0.0,
+            hp: 1000.0, max_hp: 1000.0, radius: 8.0, speed: 0.0,
+            kind: 5, frozen_until: 0.0,
+        });
+        for _ in 0..20 { u.tick(0.05); } // 1s at 8 dps
+        assert!((u.gauge - 42.0).abs() < 0.5);
+        assert!(u.player_hp > 0.0); // siphon hurts charge; contact DPS unchanged
+        // Nearly broke: drains to zero, never negative.
+        u.gauge = 5.0;
+        for _ in 0..20 { u.tick(0.05); }
+        assert_eq!(u.gauge, 0.0);
+    }
+
+    #[test]
+    fn thief_spawn_gated_by_wave_and_capped_at_two() {
+        let mut u = Universe::new(480.0, 800.0);
+        u.frame_count = 1;
+        u.wave = 1;
+        assert_eq!(u.roll_spawn_kind(0.99, 18), 0);
+        u.wave = 2;
+        assert_eq!(u.roll_spawn_kind(0.99, 18), 1);
+        u.wave = 3;
+        assert_eq!(u.roll_spawn_kind(0.95, 18), 5);
+        u.wave = 4;
+        assert_eq!(u.roll_spawn_kind(0.95, 18), 5);
+        u.wave = 5;
+        assert_eq!(u.roll_spawn_kind(0.92, 18), 5);
+        assert_eq!(u.roll_spawn_kind(0.97, 18), 4); // overlord keeps its 5%
+        // Cap: two thieves live → downgrade to grunt.
+        u.wave = 3;
+        for k in 0..2 {
+            u.enemies.push(Enemy {
+                id: 10 + k, x: 100.0, y: 100.0, vx: 0.0, vy: 0.0,
+                hp: 10.0, max_hp: 10.0, radius: 8.0, speed: 0.0,
+                kind: 5, frozen_until: 0.0,
+            });
+        }
+        assert_eq!(u.roll_spawn_kind(0.95, 18), 0);
+        // Incoming telegraphs count toward the cap too.
+        u.enemies.pop();
+        u.telegraphs.push(Telegraph { x: 1.0, y: 1.0, kind: 5, timer: 1.0 });
+        assert_eq!(u.roll_spawn_kind(0.95, 18), 0);
     }
 
     #[test]

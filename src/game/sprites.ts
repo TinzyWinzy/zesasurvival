@@ -24,7 +24,8 @@ export const ENEMY_STYLE: Record<number, { color: string; radius: number }> = {
   1: { color: '#FFD700', radius: 8 }, // striker — gold needle triangle
   2: { color: '#9D00FF', radius: 16 }, // tank — amethyst hexagon
   3: { color: '#8B5CF6', radius: 14 }, // elite — violet pentagon
-  4: { color: '#EC4899', radius: 26 } // overlord — magenta + ring
+  4: { color: '#EC4899', radius: 26 }, // overlord — magenta + ring
+  5: { color: '#E8A04C', radius: 8 } // cable thief — copper cutter
 };
 
 function bolt(ctx: CanvasRenderingContext2D, cx: number, cy: number, s: number) {
@@ -149,15 +150,24 @@ export function drawEnemy(
   const radius = (ENEMY_STYLE[kind] || ENEMY_STYLE[0]).radius;
   ctx.save();
   ctx.fillStyle = '#250F1C';
-  ctx.strokeStyle = kind >= 3 ? '#FDA4AF' : '#FB466A';
+  ctx.strokeStyle = kind === 5 ? '#E8A04C' : kind >= 3 ? '#FDA4AF' : '#FB466A';
   ctx.lineWidth = kind === 2 ? 2.8 : 1.8;
   const sides = kind === 0 ? 4 : kind === 1 ? 3 : kind === 2 ? 6 : kind === 3 ? 5 : 8;
   poly(ctx, x, y, radius, sides, kind === 2 ? 0 : -Math.PI / 2);
   ctx.fill(); ctx.stroke();
-  ctx.strokeStyle = '#FB466A';
+  ctx.strokeStyle = kind === 5 ? '#FDE68A' : '#FB466A';
   ctx.lineWidth = 1;
   poly(ctx, x, y, radius * 0.45, sides);
   ctx.stroke();
+  if (kind === 5) {
+    // Sparking cut across the body — the stolen wire.
+    ctx.strokeStyle = '#FDE68A';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(x - radius * 0.55, y + radius * 0.55);
+    ctx.lineTo(x + radius * 0.55, y - radius * 0.55);
+    ctx.stroke();
+  }
   if (kind === 4) {
     ctx.strokeStyle = '#FDA4AF';
     poly(ctx, x, y, radius + 7, 4, t * 0.001);
