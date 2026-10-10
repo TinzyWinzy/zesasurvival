@@ -118,6 +118,12 @@ class Sfx {
     this.tone(hz(900), 0.1, 'square', 0.15, hz(300), 0.05);
   }
 
+  /** Night-shift braam: low furnace swell for the boss entrance. */
+  boss() {
+    this.tone(hz(110), 0.5, 'sawtooth', 0.4, hz(55));
+    this.tone(hz(165), 0.4, 'square', 0.2, hz(82), 0.1);
+  }
+
   /** A major arpeggio — the Picardy third that resolves the minor bed. */
   victory() {
     [440, 554.37, 659.25, 880].forEach((f, i) =>

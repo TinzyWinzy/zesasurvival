@@ -37,7 +37,7 @@ pub struct Enemy {
     pub max_hp: f32,
     pub radius: f32,
     pub speed: f32,
-    pub kind: u8, // 0=grunt, 1=striker, 2=tank, 3=elite, 4=overlord, 5=cable thief
+    pub kind: u8, // 0=grunt, 1=striker, 2=tank, 3=elite, 4=overlord, 5=cable thief, 6=boss
     pub frozen_until: f32,
 }
 
@@ -90,6 +90,13 @@ const MAX_THIEVES: usize = 2;
 // Cable thief: clamps onto the battery and siphons stored charge.
 const THIEF_KIND: u8 = 5;
 const THIEF_SIPHON_DPS: f32 = 8.0;
+// Kariba Night Shift: one wave-5 boss per run. Slow, huge, heavy contact,
+// and a death burst of harvestable charge worth the kill.
+const BOSS_KIND: u8 = 6;
+const BOSS_TELEGRAPH_TIME: f32 = 2.5;
+const BOSS_ENERGY_BURST: usize = 8;
+const BOSS_CONTACT_DPS: f32 = 10.0;
+const MAX_BOSSES: usize = 1;
 // Player maturity: each level hardens the battery and sharpens merge
 // damage, answering enemy HP/speed scaling with level.
 const LEVEL_HP_GAIN: f32 = 4.0;
@@ -232,6 +239,7 @@ pub struct Universe {
     next_id: u64,
     frame_count: u64,
     seed: u64, // daily-grid spawn seed; 0 = unseeded variety
+    boss_spawned: bool, // Kariba Night Shift enters once per run
     game_over: bool,
     victory: bool,
     wave: u32,
@@ -309,6 +317,7 @@ impl Universe {
             next_id: 1,
             frame_count: 0,
             seed: 0,
+            boss_spawned: false,
             game_over: false,
             victory: false,
             wave: 1,
@@ -571,6 +580,7 @@ impl Universe {
 
     /// Spawn mix by wave. Cable thieves appear from wave 3 and are capped —
     /// at most two on the field (live + incoming), extras downgrade to grunts.
+    /// The Night Shift opens wave 5 exactly once; repeats downgrade to overlords.
     fn roll_spawn_kind(&self, roll: f32, interval: u64) -> u8 {
         let kind = match self.wave {
             1 => 0,
@@ -602,7 +612,10 @@ impl Universe {
                 }
             }
             _ => {
-                if self.frame_count % (interval * 5) == 0 {
+                if !self.boss_spawned {
+                    // The Night Shift opens wave 5: one entrance, then the mix.
+                    6
+                } else if self.frame_count % (interval * 5) == 0 {
                     4
                 } else if roll < 0.35 {
                     0
@@ -619,6 +632,13 @@ impl Universe {
                 }
             }
         };
+        if kind == BOSS_KIND {
+            let bosses = self.enemies.iter().filter(|e| e.kind == BOSS_KIND).count()
+                + self.telegraphs.iter().filter(|t| t.kind == BOSS_KIND).count();
+            if self.boss_spawned || bosses >= MAX_BOSSES {
+                return 4;
+            }
+        }
         if kind == THIEF_KIND {
             let thieves = self.enemies.iter().filter(|e| e.kind == THIEF_KIND).count()
                 + self.telegraphs.iter().filter(|t| t.kind == THIEF_KIND).count();
@@ -714,6 +734,7 @@ impl Universe {
                 3 => (6.0, 0.8, 14.0),  // elite
                 4 => (25.0, 0.5, 26.0), // overlord
                 5 => (0.5, 1.9, 8.0),   // cable thief: fast, fragile
+                6 => (40.0, 0.35, 34.0), // Kariba Night Shift: slow siege
                 _ => (1.0, 1.0, 10.0),  // grunt
             };
             if kind == 4 && self.enemies.iter().filter(|e| e.kind == 4).count() >= 3 {
@@ -771,7 +792,15 @@ impl Universe {
             };
             let roll = self.rand01(29);
             let kind = self.roll_spawn_kind(roll, interval);
-            self.telegraphs.push(Telegraph { x: ex, y: ey, kind, timer: TELEGRAPH_TIME });
+            if kind == BOSS_KIND {
+                self.boss_spawned = true;
+            }
+            self.telegraphs.push(Telegraph {
+                x: ex,
+                y: ey,
+                kind,
+                timer: if kind == BOSS_KIND { BOSS_TELEGRAPH_TIME } else { TELEGRAPH_TIME },
+            });
         }
 
         // Adaptive cell substeps limit travel to less than half the smallest radius.
@@ -786,6 +815,7 @@ impl Universe {
         let freeze_mult = if self.freeze_timer > 0.0 { 0.6 } else { 1.0 };
         let mut touching = 0u32;
         let mut thieves_touching = 0u32;
+        let mut boss_touching = 0u32;
         for enemy in self.enemies.iter_mut() {
             let dx = px - enemy.x;
             let dy = py - enemy.y;
@@ -800,6 +830,9 @@ impl Universe {
                 touching += 1;
                 if enemy.kind == THIEF_KIND {
                     thieves_touching += 1;
+                }
+                if enemy.kind == BOSS_KIND {
+                    boss_touching += 1;
                 }
             }
         }
@@ -816,6 +849,14 @@ impl Universe {
         // Cable thieves siphon stored charge while clamped on — gauge, not HP.
         if thieves_touching > 0 {
             self.gauge = (self.gauge - THIEF_SIPHON_DPS * thieves_touching as f32 * dt).max(0.0);
+        }
+        // The Night Shift hits heavy up close, on top of capped contact DPS.
+        if boss_touching > 0 && !self.game_over {
+            self.player_hp -= BOSS_CONTACT_DPS * boss_touching as f32 * dt;
+            if self.player_hp <= 0.0 {
+                self.player_hp = 0.0;
+                self.game_over = true;
+            }
         }
         let _ = INVULN_SECONDS;
 
@@ -900,22 +941,52 @@ impl Universe {
         }
 
         // P2: kills drop harvestable energy cells via pity engine.
-        let mut dead_pos = Vec::new();
+        // A fallen boss bursts a ring of charge worth the kill.
+        let mut dead: Vec<(f32, f32, u8)> = Vec::new();
         self.enemies.retain(|e| {
             if e.hp > 0.0 {
                 true
             } else {
-                dead_pos.push((e.x, e.y));
+                dead.push((e.x, e.y, e.kind));
                 false
             }
         });
-        for (i, (dx, dy)) in dead_pos.into_iter().enumerate() {
+        for (i, (dx, dy, kind)) in dead.into_iter().enumerate() {
             if self.energies.len() >= MAX_ENERGY_CELLS {
                 break;
             }
             let sample = self.rand01(1000 + i as u64);
             if self.pity.evaluate_drop(sample) {
                 self.energies.push(Energy { x: dx, y: dy, vy: 60.0, life: 8.0 });
+            }
+            if kind == BOSS_KIND {
+                for k in 0..BOSS_ENERGY_BURST {
+                    if self.energies.len() >= MAX_ENERGY_CELLS {
+                        break;
+                    }
+                    let angle = (k as f32) * 6.28318 / (BOSS_ENERGY_BURST as f32);
+                    self.energies.push(Energy {
+                        x: dx + angle.cos() * 30.0,
+                        y: dy + angle.sin() * 30.0,
+                        vy: 60.0,
+                        life: 8.0,
+                    });
+                }
+                for k in 0..20 {
+                    if self.particles.len() >= MAX_PARTICLES {
+                        break;
+                    }
+                    let angle = (k as f32) * 6.28318 / 20.0;
+                    self.particles.push(Particle {
+                        x: dx,
+                        y: dy,
+                        vx: angle.cos() * 180.0,
+                        vy: angle.sin() * 180.0,
+                        life: 0.7,
+                        max_life: 0.7,
+                        color_tier: 8,
+                    });
+                }
             }
         }
 
@@ -1339,7 +1410,7 @@ impl Universe {
         for t in &self.telegraphs {
             self.render_buffer.push(t.x);
             self.render_buffer.push(t.y);
-            self.render_buffer.push((1.0 - t.timer / TELEGRAPH_TIME).clamp(0.0, 1.0));
+            self.render_buffer.push((1.0 - t.timer / if t.kind == BOSS_KIND { BOSS_TELEGRAPH_TIME } else { TELEGRAPH_TIME }).clamp(0.0, 1.0));
         }
 
         for b in &self.beams {
@@ -1890,6 +1961,8 @@ mod tests {
         u.wave = 4;
         assert_eq!(u.roll_spawn_kind(0.95, 18), 5);
         u.wave = 5;
+        // Wave 5 opens with the boss; past the entrance the thief mix applies.
+        u.boss_spawned = true;
         assert_eq!(u.roll_spawn_kind(0.92, 18), 5);
         assert_eq!(u.roll_spawn_kind(0.97, 18), 4); // overlord keeps its 5%
         // Cap: two thieves live → downgrade to grunt.
@@ -1945,6 +2018,75 @@ mod tests {
         // the relay must still stand at 3s.
         for _ in 0..60 { u.tick(0.05); }
         assert_eq!(u.get_relay_count(), 1);
+    }
+
+    #[test]
+    fn boss_opens_wave_five_exactly_once() {
+        let mut u = Universe::new(480.0, 800.0);
+        u.frame_count = 1;
+        u.wave = 4;
+        assert_ne!(u.roll_spawn_kind(0.5, 18), 6); // never before wave 5
+        u.wave = 5;
+        assert_eq!(u.roll_spawn_kind(0.5, 18), 6);
+        // Simulate the push site: flag set, telegraph incoming.
+        u.boss_spawned = true;
+        u.telegraphs.push(Telegraph { x: 240.0, y: 10.0, kind: 6, timer: BOSS_TELEGRAPH_TIME });
+        assert_ne!(u.roll_spawn_kind(0.5, 18), 6); // repeats downgrade
+        assert_eq!(u.roll_spawn_kind(0.97, 18), 4);
+    }
+
+    #[test]
+    fn boss_materializes_slow_and_huge() {
+        let mut u = Universe::new(480.0, 800.0);
+        u.telegraphs.push(Telegraph { x: 240.0, y: 100.0, kind: 6, timer: 0.0 });
+        for _ in 0..5 { u.tick(0.05); }
+        assert_eq!(u.enemies.len(), 1);
+        let b = &u.enemies[0];
+        assert_eq!(b.kind, 6);
+        assert_eq!(b.radius, 34.0);
+        // Level 1 base: hp (12+3)*40, speed (48+2.5)*0.35.
+        assert!((b.hp - 600.0).abs() < 0.01);
+        assert!((b.speed - 17.675).abs() < 0.1);
+    }
+
+    #[test]
+    fn boss_contact_hits_harder_than_grunt() {
+        let mut grunt_world = Universe::new(480.0, 800.0);
+        grunt_world.enemies.push(Enemy {
+            id: 1, x: grunt_world.player_x, y: grunt_world.player_y,
+            vx: 0.0, vy: 0.0, hp: 10000.0, max_hp: 10000.0,
+            radius: 10.0, speed: 0.0, kind: 0, frozen_until: 0.0,
+        });
+        let mut boss_world = Universe::new(480.0, 800.0);
+        boss_world.enemies.push(Enemy {
+            id: 1, x: boss_world.player_x, y: boss_world.player_y,
+            vx: 0.0, vy: 0.0, hp: 10000.0, max_hp: 10000.0,
+            radius: 34.0, speed: 0.0, kind: 6, frozen_until: 0.0,
+        });
+        for _ in 0..20 { grunt_world.tick(0.05); boss_world.tick(0.05); }
+        // 1s: boss deals ~10 extra damage on top of capped contact DPS.
+        let extra = grunt_world.player_hp - boss_world.player_hp;
+        assert!(extra > 8.0 && extra < 12.0);
+    }
+
+    #[test]
+    fn boss_death_bursts_harvestable_charge() {
+        let mut u = Universe::new(480.0, 800.0);
+        u.enemies.push(Enemy {
+            id: 1, x: 240.0, y: 400.0, vx: 0.0, vy: 0.0,
+            hp: 1.0, max_hp: 600.0, radius: 34.0, speed: 0.0,
+            kind: 6, frozen_until: 0.0,
+        });
+        // L2 merge at the kill site clears it.
+        u.drop_orb(240.0, 2);
+        u.drop_orb(240.0, 2);
+        u.orbs[1].x = u.orbs[0].x + 1.0;
+        u.orbs[1].y = 400.0;
+        u.orbs[0].y = 400.0;
+        u.tick(0.016);
+        assert!(u.enemies.is_empty());
+        assert!(u.energies.len() >= BOSS_ENERGY_BURST);
+        assert!(!u.particles.is_empty());
     }
 
 }

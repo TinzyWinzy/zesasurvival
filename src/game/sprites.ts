@@ -25,7 +25,8 @@ export const ENEMY_STYLE: Record<number, { color: string; radius: number }> = {
   2: { color: '#9D00FF', radius: 16 }, // tank — amethyst hexagon
   3: { color: '#8B5CF6', radius: 14 }, // elite — violet pentagon
   4: { color: '#EC4899', radius: 26 }, // overlord — magenta + ring
-  5: { color: '#E8A04C', radius: 8 } // cable thief — copper cutter
+  5: { color: '#E8A04C', radius: 8 }, // cable thief — copper cutter
+  6: { color: '#F59E0B', radius: 34 } // Kariba Night Shift — amber siege ring
 };
 
 function bolt(ctx: CanvasRenderingContext2D, cx: number, cy: number, s: number) {
@@ -150,7 +151,7 @@ export function drawEnemy(
   const radius = (ENEMY_STYLE[kind] || ENEMY_STYLE[0]).radius;
   ctx.save();
   ctx.fillStyle = '#250F1C';
-  ctx.strokeStyle = kind === 5 ? '#E8A04C' : kind >= 3 ? '#FDA4AF' : '#FB466A';
+  ctx.strokeStyle = kind === 6 ? '#F59E0B' : kind === 5 ? '#E8A04C' : kind >= 3 ? '#FDA4AF' : '#FB466A';
   ctx.lineWidth = kind === 2 ? 2.8 : 1.8;
   const sides = kind === 0 ? 4 : kind === 1 ? 3 : kind === 2 ? 6 : kind === 3 ? 5 : 8;
   poly(ctx, x, y, radius, sides, kind === 2 ? 0 : -Math.PI / 2);
@@ -172,6 +173,19 @@ export function drawEnemy(
     ctx.strokeStyle = '#FDA4AF';
     poly(ctx, x, y, radius + 7, 4, t * 0.001);
     ctx.stroke();
+  }
+  if (kind === 6) {
+    // Siege rings: slow counter-rotating diamonds over a hot core.
+    ctx.strokeStyle = 'rgba(245,158,11,0.85)';
+    ctx.lineWidth = 2.5;
+    poly(ctx, x, y, radius + 9, 4, t * 0.0006);
+    ctx.stroke();
+    poly(ctx, x, y, radius + 9, 4, -t * 0.0006);
+    ctx.stroke();
+    ctx.fillStyle = 'rgba(251,191,36,0.9)';
+    ctx.beginPath();
+    ctx.arc(x, y, 5 + Math.sin(t * 0.006) * 1.5, 0, TAU);
+    ctx.fill();
   }
   ctx.restore();
 }

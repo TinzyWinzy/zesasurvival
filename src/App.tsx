@@ -97,6 +97,7 @@ export default function App() {
   const prevGaugeRef = useRef(0);
   const prevRelayCountRef = useRef(0);
   const seenThiefRef = useRef(false);
+  const seenBossRef = useRef(false);
   const prevHpRef = useRef(100);
   const pausedMsRef = useRef(0);
   const aimRef = useRef({ active: false, x: 0, level: 1, charged: false });
@@ -454,8 +455,15 @@ export default function App() {
                   setToasts((t) => [...t.slice(-2), { id, title: 'Cable thief', desc: 'It siphons your gauge — kill it fast.' }]);
                   setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 3000);
                 }
+                if (ekind === 6 && !seenBossRef.current) {
+                  seenBossRef.current = true;
+                  sfx.boss();
+                  const id = ++toastIdRef.current;
+                  setToasts((t) => [...t.slice(-2), { id, title: 'KARIBA NIGHT SHIFT', desc: 'Bring it down — its charge is yours.' }]);
+                  setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 4000);
+                }
                 drawEnemy(ctx, ekind, ex, ey, visualTime);
-                const er = ekind === 2 ? 16 : ekind === 4 ? 26 : ekind === 3 ? 14 : ekind === 1 || ekind === 5 ? 8 : 10;
+                const er = ekind === 6 ? 34 : ekind === 2 ? 16 : ekind === 4 ? 26 : ekind === 3 ? 14 : ekind === 1 || ekind === 5 ? 8 : 10;
                 ctx.fillStyle = 'rgba(255,255,255,0.75)';
                 ctx.fillRect(ex - er, ey - er - 7, er * 2 * Math.max(0, Math.min(1, ehp)), 3);
               }
@@ -803,6 +811,7 @@ export default function App() {
     prevGaugeRef.current = 0;
     prevRelayCountRef.current = 0;
     seenThiefRef.current = false;
+    seenBossRef.current = false;
     perfModeRef.current = 1;
     lastPerfCheckRef.current = 0;
     prevHpRef.current = 100;
