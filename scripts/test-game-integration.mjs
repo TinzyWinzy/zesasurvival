@@ -27,8 +27,9 @@ assert.equal(data[22], 3);
 assert.ok(data[24] > 0, 'A merge must produce a correctly indexed beam');
 assert.ok(data[2] > 0, 'Merge particle records must be included in the frame');
   for (const [name, index] of [['pgauge', 23], ['beamCount', 24], ['energyCount', 25], ['prelayCount', 33]]) {
-  assert.match(app, new RegExp(`const ${name} = copy\\[${index}\\]`));
-}
+    assert.match(app, new RegExp(`const ${name} = copy\\[${index}\\]`));
+  }
+  assert.match(app, /const pstress = .*copy\[34\]/);
 for (let i = 0; i < 500; i++) { u.tick(1 / 60); frame(u); }
 u.resize(320, 600);
 assert.ok(u.get_player_x() <= 300);
@@ -105,6 +106,15 @@ try {
   {
     const f = freq(null, {});
     assert.ok(Math.abs(f[1] - 1 / 3) < 0.06 && Math.abs(f[2] - 1 / 3) < 0.06 && Math.abs(f[3] - 1 / 3) < 0.06);
+  }
+  // Bag guarantee: level 1 waiting but missing from the last 4 is forced.
+  {
+    const rand = mulberry(99);
+    for (let i = 0; i < 200; i++) {
+      assert.equal(dealOrb([2, 3, 2, 3], { 1: 2 }, rand), 1);
+    }
+    // No drought, no force: streak memory still rules.
+    assert.ok(freq([2, 2, 2, 2], {})[2] > 0.45);
   }
   // Hold slot: park into empty, exchange, locked no-op, one hold per drop.
   {

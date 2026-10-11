@@ -42,7 +42,7 @@ import {
 const MAX_WIDTH = 480;
 const HUD_SYNC_MS = 250;
 const DROP_COOLDOWN_MS = 250;
-const HEADER_LEN = 34;
+const HEADER_LEN = 35;
 
 const WAVE_BANNERS: Record<number, { title: string; desc: string }> = {
   2: { title: 'WAVE 2 — Escalation', desc: 'Fast strikers from the edges' },
@@ -132,6 +132,8 @@ export default function App() {
   const [timeLeft, setTimeLeft] = useState(300);
   const [runSeconds, setRunSeconds] = useState(0);
   const [gauge, setGauge] = useState(0);
+  const [stress, setStress] = useState(0);
+  const prevStressRef = useRef(0);
   const [relayCount, setRelayCount] = useState(0);
   const [relayArmed, setRelayArmed] = useState(false);
   const relayArmedRef = useRef(false);
@@ -315,6 +317,7 @@ export default function App() {
             const beamCount = copy[24] | 0;
             const energyCount = copy[25] | 0;
             const prelayCount = copy[33] | 0;
+            const pstress = Math.max(0, Math.min(1, copy[34]));
 
             maxComboRef.current = Math.max(maxComboRef.current, pbest);
             // Clean merge feedback: sound only. Pop + glyph carry the visual.
@@ -323,6 +326,13 @@ export default function App() {
               sfx.merge(pcombo);
             }
             mergesRef.current = pmerges;
+            // Grid stress crossing: warn once per climb so the spawn surge reads.
+            if (pstress >= 0.75 && prevStressRef.current < 0.75 && !pvictory && !universe.is_game_over()) {
+              const id = ++toastIdRef.current;
+              setToasts((t) => [...t.slice(-2), { id, title: 'Grid stressed', desc: 'Merge the pile down — spawns quicken.' }]);
+              setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 3000);
+            }
+            prevStressRef.current = pstress;
             // Relay loss reads like any other battlefield event, not a vanishing.
             if (prelayCount < prevRelayCountRef.current && !pvictory && !universe.is_game_over()) {
               const id = ++toastIdRef.current;
@@ -403,6 +413,7 @@ export default function App() {
                 setRunSeconds(Math.round(total - ptimeLeft));
               }
               setGauge(pgauge);
+              setStress(pstress);
               setRelayCount(prelayCount);
               if (universe.is_game_over()) setGameOver(true);
             }
@@ -734,10 +745,10 @@ export default function App() {
     }
     if (u.drop_orb(x, nextOrb)) {
       sfx.drop();
-      // Markov deal: history (last two dropped) + live board counts.
-      const hist = [...dropHistoryRef.current.slice(-1), nextOrb];
+      // Markov deal: last four dropped + live board counts (bag guarantee).
+      const hist = [...dropHistoryRef.current.slice(-3), nextOrb];
       dropHistoryRef.current = hist;
-      setNextOrb(dealOrb(hist.length === 2 ? [hist[0], hist[1]] : null, boardCountsRef.current));
+      setNextOrb(dealOrb(hist, boardCountsRef.current));
       setHoldLocked(false);
     }
   };
@@ -749,8 +760,7 @@ export default function App() {
     if (holdLocked) return;
     sfx.unlock();
     const hist = dropHistoryRef.current;
-    const r = holdSwap(heldOrb, nextOrb, false, () =>
-      dealOrb(hist.length === 2 ? [hist[0], hist[1]] : null, boardCountsRef.current));
+    const r = holdSwap(heldOrb, nextOrb, false, () => dealOrb(hist, boardCountsRef.current));
     setHeldOrb(r.held);
     setNextOrb(r.next);
     setHoldLocked(true);
@@ -835,6 +845,7 @@ export default function App() {
     waveRef.current = 1;
     prevMergesRef.current = 0;
     prevGaugeRef.current = 0;
+    prevStressRef.current = 0;
     prevRelayCountRef.current = 0;
     seenThiefRef.current = false;
     seenBossRef.current = false;
@@ -996,6 +1007,7 @@ export default function App() {
           wave={wave}
           timeLeft={timeLeft}
           gauge={gauge}
+          stress={stress}
           endless={mode === 2}
           isOffline={isOffline}
           needRefresh={false}

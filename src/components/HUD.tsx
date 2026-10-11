@@ -5,6 +5,7 @@ interface HUDProps {
   xp: number; nextXp: number; combo: number; comboFrac: number;
   nextOrb: number; heldOrb: number | null; holdLocked: boolean;
   onHold: () => void;
+  stress: number;
   surgeLeft: number; freezeLeft: number;
   bestScore: number; wave: number; timeLeft: number; gauge: number;
   endless: boolean; isOffline: boolean;
@@ -12,7 +13,7 @@ interface HUDProps {
 }
 const COLORS: Record<number, string> = {1: '#C87533', 2: '#F59E0B', 3: '#FDE047'};
 export const HUD: React.FC<HUDProps> = ({score, level, hp, maxHp, xp, nextXp,
-  combo, comboFrac, nextOrb, heldOrb, holdLocked, onHold, surgeLeft, freezeLeft, bestScore, wave,
+  combo, comboFrac, nextOrb, heldOrb, holdLocked, onHold, stress, surgeLeft, freezeLeft, bestScore, wave,
   timeLeft, gauge, endless, isOffline}) => {
   const health = Math.min(100, Math.max(0, hp / Math.max(1, maxHp) * 100));
   const experience = Math.min(100, Math.max(0, xp / Math.max(1, nextXp) * 100));
@@ -53,6 +54,14 @@ export const HUD: React.FC<HUDProps> = ({score, level, hp, maxHp, xp, nextXp,
           </button>
         </div>
         <div className="col-span-2 h-0.5 bg-slate-800" role="progressbar" aria-label="Level XP" aria-valuenow={Math.round(experience)} aria-valuemin={0} aria-valuemax={100}><div className="h-full bg-amber-300/70" style={{width: `${experience}%`}} /></div>
+        {stress > 0.05 && (
+          <div className="col-span-2 flex items-center gap-2" role="progressbar" aria-label="Grid stress" aria-valuenow={Math.round(stress * 100)} aria-valuemin={0} aria-valuemax={100}>
+            <span className={`text-[9px] font-black uppercase tracking-[0.18em] ${stress >= 0.75 ? 'text-red-300' : 'text-amber-200/80'}`}>Stress</span>
+            <div className="flex-1 h-1 bg-slate-800 overflow-hidden rounded-sm">
+              <div className={`h-full ${stress >= 0.75 ? 'bg-red-400' : 'bg-amber-300/80'}`} style={{width: `${Math.round(stress * 100)}%`}} />
+            </div>
+          </div>
+        )}
       </div>
       <div className="flex flex-wrap gap-2 items-center mt-2 text-[10px] font-bold tabular-nums">
         <span className={`px-2 py-1 rounded border ${charged ? 'bg-lime-300 border-lime-200 text-slate-950' : 'bg-slate-950/80 border-slate-700 text-lime-200'}`} role="progressbar" aria-label="Drop charge" aria-valuenow={Math.round(Math.min(100, gauge))} aria-valuemin={0} aria-valuemax={100}>{charged ? 'CHARGED · NEXT DROP L4' : `CHARGE ${Math.floor(gauge)}%`}</span>

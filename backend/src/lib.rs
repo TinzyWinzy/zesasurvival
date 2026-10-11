@@ -237,6 +237,8 @@ pub struct Universe {
     energies: Vec<Energy>,
     relays: Vec<Relay>,
     gauge: f32,
+    // Grid stress 0..1: piled cells breed pressure. Smoothed; drives spawns.
+    stress: f32,
     pity: MercyPityEngine,
     next_id: u64,
     frame_count: u64,
@@ -315,6 +317,7 @@ impl Universe {
             energies: Vec::new(),
             relays: Vec::new(),
             gauge: 0.0,
+            stress: 0.0,
             pity: MercyPityEngine::new(5, 0.8),
             next_id: 1,
             frame_count: 0,
@@ -761,6 +764,14 @@ impl Universe {
             self.next_id += 1;
         }
 
+        // Grid stress: cells piled above the 40% line breed pressure. Fresh
+        // drops transit the zone in under a second; smoothing (~0.5s tau)
+        // keeps them from registering, but a real pile pins it at 1.
+        let stress_line = self.height * 0.4;
+        let piled = self.orbs.iter().filter(|o| o.y < stress_line).count();
+        let stress_target = ((piled as f32) / 6.0).min(1.0);
+        self.stress += (stress_target - self.stress) * (dt * 2.0).min(1.0);
+
         // Playtest #1 (victory, "too easy", smooth fps): tightened ~20%.
         let base_interval: u64 = match self.wave {
             1 => 36,
@@ -780,6 +791,8 @@ impl Universe {
         let interval = if in_surge { base_interval / 2 } else { base_interval }
             .saturating_sub(ot_mins * 2)
             .clamp(6, 60);
+        // Stressed grid spawns up to twice as fast — merge the pile down.
+        let interval = ((interval as f32 * (1.0 - 0.5 * self.stress)).round() as u64).max(6);
         if self.frame_count % interval == 0
             && self.enemies.len() + self.telegraphs.len() < self.enemy_cap
             && self.telegraphs.len() < MAX_TELEGRAPHS
@@ -1116,6 +1129,22 @@ impl Universe {
                                 self.orbs[k].vy += dy / distance * kick;
                             }
                         }
+                        // Merge shockwave: consumed-tier neighbours surf toward the
+                        // crater at distance-proportional speed, so they arrive
+                        // together — the seed of chain reactions.
+                        let consumed = next_level.saturating_sub(1).max(1);
+                        let pull_radius = 100.0 + 20.0 * (next_level as f32);
+                        for k in 0..orb_len {
+                            if k == i || k == j || self.orbs[k].is_merged { continue; }
+                            if self.orbs[k].level != consumed { continue; }
+                            let dx = mid_x - self.orbs[k].x;
+                            let dy = mid_y - self.orbs[k].y;
+                            let distance = (dx * dx + dy * dy).sqrt();
+                            if distance < 1.0 || distance > pull_radius { continue; }
+                            let sp = (distance * 1.5).min(220.0);
+                            self.orbs[k].vx += dx / distance * sp;
+                            self.orbs[k].vy += dy / distance * sp;
+                        }
 
                         // Combo: chain merges inside window.
                         if self.combo_timer > 0.0 {
@@ -1333,14 +1362,14 @@ impl Universe {
         }
     }
 
-    /// Packed render data. Header (34 floats, append-only; 0..16 stable):
+    /// Packed render data. Header (35 floats, append-only; 0..16 stable):
     /// [orb_count, enemy_count, particle_count, player_x, player_y,
     ///  player_hp, player_max_hp, score, level, xp, next_xp,
     ///  combo, combo_frac, best_combo, pending_choices, surge_left, freeze_left,
     ///  wave, time_left, victory, telegraph_count, merge_count,
     ///  last_merge_tier, gauge, beam_count, energy_count,
     ///  beam_width_mult, multi_shot_chance, cryo_nova, chain_lightning,
-    ///  plasma_shield, overclock_speed, magnet_radius_mult, relay_count]
+    ///  plasma_shield, overclock_speed, magnet_radius_mult, relay_count, stress]
     /// Orbs: x, y, level, radius (4 each)
     /// Enemies: x, y, hp_percent, kind (4 each)
     /// Particles: x, y, life_percent, color_tier (4 each)
@@ -1389,6 +1418,7 @@ impl Universe {
         self.render_buffer.push(self.overclock_speed);
         self.render_buffer.push(self.magnet_radius_mult);
         self.render_buffer.push(self.relays.len() as f32);
+        self.render_buffer.push(self.stress);
 
         for orb in &self.orbs {
             self.render_buffer.push(orb.x);
@@ -2103,6 +2133,40 @@ mod tests {
         assert!(u.enemies.is_empty());
         assert!(u.energies.len() >= BOSS_ENERGY_BURST);
         assert!(!u.particles.is_empty());
+    }
+
+    #[test]
+    fn grid_stress_tracks_pile_and_releases() {
+        let mut u = Universe::new(480.0, 800.0);
+        assert_eq!(u.stress, 0.0);
+        // Six cells pinned high (spaced to never merge).
+        for k in 0..6 {
+            u.drop_orb(60.0 + k as f32 * 60.0, 1);
+        }
+        for t in 0..30 {
+            if t % 5 == 0 {
+                for o in u.orbs.iter_mut() { o.y = 150.0; o.vx = 0.0; o.vy = 0.0; }
+            }
+            u.tick(0.05);
+        }
+        assert!(u.stress > 0.8, "piled grid must stress, got {}", u.stress);
+        // Cleared board releases back toward zero.
+        u.orbs.clear();
+        for _ in 0..60 { u.tick(0.05); }
+        assert!(u.stress < 0.2, "cleared grid must release, got {}", u.stress);
+    }
+
+    #[test]
+    fn merge_shockwave_sets_up_chain_reaction() {
+        let mut u = Universe::new(480.0, 800.0);
+        // Pair A merges on contact; pair B (same tier) waits in pull range.
+        for _ in 0..4 { u.drop_orb(100.0, 1); }
+        let spots = [(100.0, 400.0), (101.0, 400.0), (175.0, 400.0), (235.0, 400.0)];
+        for (o, (x, y)) in u.orbs.iter_mut().zip(spots) {
+            o.x = x; o.y = y; o.vx = 0.0; o.vy = 0.0;
+        }
+        for _ in 0..120 { u.tick(0.05); }
+        assert!(u.merge_count >= 2, "shockwave must chain pair B, got {}", u.merge_count);
     }
 
 }
