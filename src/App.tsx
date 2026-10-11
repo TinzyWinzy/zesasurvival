@@ -9,6 +9,7 @@ import { useDialogFocus } from './components/useDialogFocus';
 import { setupServiceWorker } from './sw-register';
 import { sfx } from './audio/sound';
 import { music } from './audio/music';
+import { dealOrb } from './game/dealer';
 import {
   ORB_COLORS,
   drawOrb,
@@ -66,10 +67,6 @@ function gameSize() {
   return { width: Math.max(200, width), height: Math.max(1, height) };
 }
 
-function randomOrb(): number {
-  return Math.floor(Math.random() * 3) + 1;
-}
-
 interface Toast {
   id: number;
   title: string;
@@ -117,7 +114,10 @@ export default function App() {
   const [nextXp, setNextXp] = useState(100);
   const [combo, setCombo] = useState(0);
   const [comboFrac, setComboFrac] = useState(0);
-  const [nextOrb, setNextOrb] = useState<number>(() => randomOrb());
+  const [nextOrb, setNextOrb] = useState<number>(() => dealOrb(null, {}));
+  // Markov dealer state: dropped-level history + live board counts.
+  const dropHistoryRef = useRef<number[]>([]);
+  const boardCountsRef = useRef<Record<number, number>>({});
   const [surgeLeft, setSurgeLeft] = useState(0);
   const [freezeLeft, setFreezeLeft] = useState(0);
   const [toasts, setToasts] = useState<Toast[]>([]);
@@ -418,8 +418,10 @@ export default function App() {
 
               let idx = HEADER_LEN;
 
-              // Collect high-voltage orbs for inter-orb arcing (capped).
+              // Collect high-voltage orbs for inter-orb arcing (capped),
+              // plus droppable-level counts for the Markov dealer.
               const hi: { x: number; y: number }[] = [];
+              const counts: Record<number, number> = {};
               for (let i = 0; i < orbCount; i++) {
                 const ox = copy[idx];
                 const oy = copy[idx + 1];
@@ -427,8 +429,10 @@ export default function App() {
                 const oradius = copy[idx + 3];
                 idx += 4;
                 drawOrb(ctx, ox, oy, oradius, olevel, visualTime);
+                if (olevel >= 1 && olevel <= 3) counts[olevel] = (counts[olevel] ?? 0) + 1;
                 if (olevel >= 7 && hi.length < 12) hi.push({ x: ox, y: oy });
               }
+              boardCountsRef.current = counts;
               // Arcs jump between close T7+ neighbors (cap 8 strokes).
               let arcs = 0;
               for (let a = 0; a < hi.length && arcs < 8; a++) {
@@ -727,7 +731,10 @@ export default function App() {
     }
     if (u.drop_orb(x, nextOrb)) {
       sfx.drop();
-      setNextOrb(randomOrb());
+      // Markov deal: history (last two dropped) + live board counts.
+      const hist = [...dropHistoryRef.current.slice(-1), nextOrb];
+      dropHistoryRef.current = hist;
+      setNextOrb(dealOrb(hist.length === 2 ? [hist[0], hist[1]] : null, boardCountsRef.current));
     }
   };
 
@@ -848,7 +855,9 @@ export default function App() {
     setIsNewStars(false);
     setRunStars(0);
     setNewBadges([]);
-    setNextOrb(randomOrb());
+    dropHistoryRef.current = [];
+    boardCountsRef.current = {};
+    setNextOrb(dealOrb(null, {}));
     music.setWave(1);
   };
 

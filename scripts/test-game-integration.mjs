@@ -67,4 +67,45 @@ try {
 } finally {
   unlinkSync(fileURLToPath(temporary));
 }
-console.log('Game integration passed: render ABI, entity frames, resizing, relays, all upgrade cards, and duplicate filtering.');
+
+// Markov dealer: seeded distribution checks against the actual TS source.
+const dealerTemp = new URL('./.dealer-test.mjs', import.meta.url);
+try {
+  const dealerSource = readFileSync(new URL('../src/game/dealer.ts', import.meta.url), 'utf8');
+  writeFileSync(dealerTemp, ts.transpileModule(dealerSource, { compilerOptions: { module: ts.ModuleKind.ESNext } }).outputText);
+  const { dealOrb } = await import(dealerTemp.href);
+  const mulberry = (seed) => () => {
+    seed |= 0; seed = (seed + 0x6D2B79F5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+  const freq = (last, counts, n = 2000) => {
+    const rand = mulberry(42);
+    const f = { 1: 0, 2: 0, 3: 0 };
+    for (let i = 0; i < n; i++) f[dealOrb(last, counts, rand)]++;
+    return { 1: f[1] / n, 2: f[2] / n, 3: f[3] / n };
+  };
+  // Validity: always a droppable level.
+  {
+    const rand = mulberry(7);
+    for (let i = 0; i < 500; i++) {
+      const v = dealOrb(i % 2 ? [1, 2] : null, i % 3 ? { 2: 3 } : {}, rand);
+      assert.ok(v === 1 || v === 2 || v === 3);
+    }
+  }
+  // Streak memory: [2,2] deals 2 about half the time, well above uniform.
+  assert.ok(freq([2, 2], {})[2] > 0.45, 'streak must persist');
+  // Last-favor: [1,3] favors 3 over the 0.3 baseline.
+  assert.ok(freq([1, 3], {})[3] > 0.35, 'last level must be favored');
+  // Board pull: two level-1s on the field pull deals toward 1 (~0.44 vs 0.33).
+  assert.ok(freq(null, { 1: 2 })[1] > 0.4, 'board pair must pull its level');
+  // Empty board, no history: near-uniform.
+  {
+    const f = freq(null, {});
+    assert.ok(Math.abs(f[1] - 1 / 3) < 0.06 && Math.abs(f[2] - 1 / 3) < 0.06 && Math.abs(f[3] - 1 / 3) < 0.06);
+  }
+} finally {
+  unlinkSync(fileURLToPath(dealerTemp));
+}
+console.log('Game integration passed: render ABI, entity frames, resizing, relays, dealer, all upgrade cards, and duplicate filtering.');
