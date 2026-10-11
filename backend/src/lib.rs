@@ -11,6 +11,8 @@ const COMBO_CAP: u32 = 8;
 // P1 wave director: 5-minute Hold Until Dawn arc.
 const WIN_TIME: f32 = 300.0;
 const TELEGRAPH_TIME: f32 = 1.0;
+// Spawn warnings clear the HUD top bar (engine units == CSS px).
+const HUD_CLEAR_Y: f32 = 76.0;
 const MAX_TELEGRAPHS: usize = 20;
 
 #[derive(Clone, Debug)]
@@ -797,7 +799,9 @@ impl Universe {
             }
             self.telegraphs.push(Telegraph {
                 x: ex,
-                y: ey,
+                // Warnings must read: the HUD covers the top ~60px, and side
+                // spawns near the corners hide under it too.
+                y: ey.max(HUD_CLEAR_Y),
                 kind,
                 timer: if kind == BOSS_KIND { BOSS_TELEGRAPH_TIME } else { TELEGRAPH_TIME },
             });
@@ -1583,6 +1587,18 @@ mod tests {
             u.tick(0.05);
         }
         assert!(!u.enemies.is_empty());
+    }
+
+    #[test]
+    fn spawn_warnings_clear_the_hud() {
+        let mut u = Universe::new(480.0, 800.0);
+        for _ in 0..400 {
+            u.tick(0.05);
+            for t in u.telegraphs.iter() {
+                assert!(t.y >= HUD_CLEAR_Y, "telegraph at y={} hides under HUD", t.y);
+            }
+        }
+        assert!(!u.enemies.is_empty()); // spawns happened on several edges
     }
 
     #[test]
