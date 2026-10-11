@@ -5,6 +5,8 @@
 //      last level is favored (0.4). Matches get dealt; placement still decides.
 //   2. Board bias — any droppable level with 2+ orbs on the field (a merge
 //      waiting to happen) pulls +0.2 probability.
+// A bag guarantee backstops both: a waiting merge missed by the last 4 deals
+// is forced.
 // The hottest level caps at 0.65 so the deal never goes deterministic, and an
 // empty board deals near-uniform. Pure function of (history, counts, rand) —
 // trivially testable with a seeded RNG.
@@ -17,18 +19,29 @@ const BOARD_PULL = 0.2;
 const HOT_CAP = 0.65;
 
 export function dealOrb(
-  last: [number, number] | null,
+  last: number[] | null,
   counts: Record<number, number>,
   rand: () => number = Math.random
 ): DroppableLevel {
+  const hist = last ?? [];
+  // Bag guarantee: a waiting merge whose level missed the last 4 deals is
+  // forced — droughts end by rule, not luck.
+  if (hist.length >= 4) {
+    const recent = hist.slice(-4);
+    for (let l = 1; l <= 3; l++) {
+      if ((counts[l] ?? 0) >= 2 && !recent.includes(l)) return l as DroppableLevel;
+    }
+  }
+  const pair: [number, number] | null =
+    hist.length >= 2 ? [hist[hist.length - 2], hist[hist.length - 1]] : null;
   let p = [1 / 3, 1 / 3, 1 / 3];
-  if (last) {
-    if (last[0] === last[1]) {
+  if (pair) {
+    if (pair[0] === pair[1]) {
       p = [0.25, 0.25, 0.25];
-      p[last[0] - 1] = STREAK_KEEP;
+      p[pair[0] - 1] = STREAK_KEEP;
     } else {
       p = [0.3, 0.3, 0.3];
-      p[last[1] - 1] = LAST_FAVOR;
+      p[pair[1] - 1] = LAST_FAVOR;
     }
   }
   for (let l = 1; l <= 3; l++) {
