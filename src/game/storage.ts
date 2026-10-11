@@ -6,13 +6,14 @@ export const MODES: { id: RunMode; name: string; desc: string; total: number }[]
   { id: 2, name: 'Endless', desc: 'no dawn. how long?', total: 0 }
 ];
 
-// Tuned 10 Oct 2026 against a real Standard best of 348,000 (n=1).
-// 1★ rewards a decent run, 2★ solid play, 3★ sits above the known best so
-// the top star stays a chase. Revisit once a few more players log shifts.
+// PROVISIONAL (Oct 2026): dealer + maturity + cascades + hold all inflate
+// merge income versus the 348k baseline these were tuned against (and a
+// 970k standard best already clears the old 3-star). Bars lifted so the top
+// star stays a chase. Revisit with 3-5 post-change runs per mode.
 export const STAR_BARS: Record<RunMode, [number, number, number]> = {
-  0: [15000, 90000, 240000],
-  1: [25000, 150000, 400000],
-  2: [20000, 120000, 350000]
+  0: [20000, 120000, 600000],
+  1: [30000, 200000, 1000000],
+  2: [25000, 150000, 800000]
 };
 
 export function starsFor(mode: RunMode, score: number): 0 | 1 | 2 | 3 {
