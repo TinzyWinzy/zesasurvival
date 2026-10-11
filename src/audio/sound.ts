@@ -124,6 +124,11 @@ class Sfx {
     this.tone(hz(165), 0.4, 'square', 0.2, hz(82), 0.1);
   }
 
+  /** Hold swap: short upward blip, distinct from pickups and drops. */
+  hold() {
+    this.tone(hz(440), 0.07, 'triangle', 0.25, hz(660));
+  }
+
   /** A major arpeggio — the Picardy third that resolves the minor bed. */
   victory() {
     [440, 554.37, 659.25, 880].forEach((f, i) =>

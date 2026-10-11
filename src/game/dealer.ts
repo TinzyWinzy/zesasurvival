@@ -53,3 +53,25 @@ export function dealOrb(
   if (r < p[0] + p[1]) return 2;
   return 3;
 }
+
+export interface HoldResult {
+  held: number | null;
+  next: number;
+  locked: boolean;
+}
+
+/**
+ * Tetris-style hold slot: park the next orb and swap it back later.
+ * One hold per drop — swapping locks until the next successful commit.
+ * Pure; `deal` supplies the fresh orb when parking into an empty slot.
+ */
+export function holdSwap(
+  held: number | null,
+  next: number,
+  locked: boolean,
+  deal: () => number
+): HoldResult {
+  if (locked) return { held, next, locked };
+  if (held == null) return { held: next, next: deal(), locked: true };
+  return { held: next, next: held, locked: true };
+}

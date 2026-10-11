@@ -74,6 +74,7 @@ try {
   const dealerSource = readFileSync(new URL('../src/game/dealer.ts', import.meta.url), 'utf8');
   writeFileSync(dealerTemp, ts.transpileModule(dealerSource, { compilerOptions: { module: ts.ModuleKind.ESNext } }).outputText);
   const { dealOrb } = await import(dealerTemp.href);
+  const { holdSwap } = await import(dealerTemp.href);
   const mulberry = (seed) => () => {
     seed |= 0; seed = (seed + 0x6D2B79F5) | 0;
     let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
@@ -104,6 +105,15 @@ try {
   {
     const f = freq(null, {});
     assert.ok(Math.abs(f[1] - 1 / 3) < 0.06 && Math.abs(f[2] - 1 / 3) < 0.06 && Math.abs(f[3] - 1 / 3) < 0.06);
+  }
+  // Hold slot: park into empty, exchange, locked no-op, one hold per drop.
+  {
+    let s = holdSwap(null, 2, false, () => 1);
+    assert.deepEqual(s, { held: 2, next: 1, locked: true });
+    s = holdSwap(1, 3, false, () => { throw new Error('must not deal on exchange'); });
+    assert.deepEqual(s, { held: 3, next: 1, locked: true });
+    s = holdSwap(1, 3, true, () => { throw new Error('must not deal when locked'); });
+    assert.deepEqual(s, { held: 1, next: 3, locked: true });
   }
 } finally {
   unlinkSync(fileURLToPath(dealerTemp));

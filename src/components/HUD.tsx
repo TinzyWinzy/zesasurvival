@@ -3,14 +3,16 @@ import React from 'react';
 interface HUDProps {
   score: number; level: number; hp: number; maxHp: number;
   xp: number; nextXp: number; combo: number; comboFrac: number;
-  nextOrb: number; surgeLeft: number; freezeLeft: number;
+  nextOrb: number; heldOrb: number | null; holdLocked: boolean;
+  onHold: () => void;
+  surgeLeft: number; freezeLeft: number;
   bestScore: number; wave: number; timeLeft: number; gauge: number;
   endless: boolean; isOffline: boolean;
   onRefreshPWA?: () => void; needRefresh: boolean;
 }
 const COLORS: Record<number, string> = {1: '#C87533', 2: '#F59E0B', 3: '#FDE047'};
 export const HUD: React.FC<HUDProps> = ({score, level, hp, maxHp, xp, nextXp,
-  combo, comboFrac, nextOrb, surgeLeft, freezeLeft, bestScore, wave,
+  combo, comboFrac, nextOrb, heldOrb, holdLocked, onHold, surgeLeft, freezeLeft, bestScore, wave,
   timeLeft, gauge, endless, isOffline}) => {
   const health = Math.min(100, Math.max(0, hp / Math.max(1, maxHp) * 100));
   const experience = Math.min(100, Math.max(0, xp / Math.max(1, nextXp) * 100));
@@ -34,7 +36,21 @@ export const HUD: React.FC<HUDProps> = ({score, level, hp, maxHp, xp, nextXp,
         <div className="col-span-2 flex items-center justify-between gap-2 text-[11px] text-slate-300 tabular-nums">
           <span className="font-bold text-white">{score.toLocaleString()} <span className="text-slate-400 font-normal">pts</span></span>
           <span>W{wave}/5 · L{level}</span>
-          <span className="flex items-center gap-1.5" aria-label={`Next cell level ${nextOrb}`}><span className="w-2.5 h-2.5 rounded-full" style={{background: COLORS[nextOrb]}} />Next L{nextOrb}</span>
+          <button
+            type="button"
+            onClick={onHold}
+            disabled={holdLocked}
+            aria-label={heldOrb ? `Swap held level ${heldOrb} with next level ${nextOrb}` : `Hold level ${nextOrb}`}
+            className={`pointer-events-auto flex items-center gap-1.5 rounded border px-1.5 py-0.5 ${holdLocked ? 'opacity-40 border-slate-800' : 'border-slate-600 active:scale-95'}`}
+          >
+            {heldOrb ? (
+              <span className="flex items-center gap-1" aria-hidden><span className="w-2.5 h-2.5 rounded-full" style={{background: COLORS[heldOrb]}} />H{heldOrb}</span>
+            ) : (
+              <span className="text-slate-500" aria-hidden>HOLD</span>
+            )}
+            <span aria-hidden className="text-slate-500">⇄</span>
+            <span className="flex items-center gap-1" aria-label={`Next cell level ${nextOrb}`}><span className="w-2.5 h-2.5 rounded-full" style={{background: COLORS[nextOrb]}} />Next L{nextOrb}</span>
+          </button>
         </div>
         <div className="col-span-2 h-0.5 bg-slate-800" role="progressbar" aria-label="Level XP" aria-valuenow={Math.round(experience)} aria-valuemin={0} aria-valuemax={100}><div className="h-full bg-amber-300/70" style={{width: `${experience}%`}} /></div>
       </div>

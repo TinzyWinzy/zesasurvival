@@ -9,7 +9,7 @@ import { useDialogFocus } from './components/useDialogFocus';
 import { setupServiceWorker } from './sw-register';
 import { sfx } from './audio/sound';
 import { music } from './audio/music';
-import { dealOrb } from './game/dealer';
+import { dealOrb, holdSwap } from './game/dealer';
 import {
   ORB_COLORS,
   drawOrb,
@@ -115,6 +115,8 @@ export default function App() {
   const [combo, setCombo] = useState(0);
   const [comboFrac, setComboFrac] = useState(0);
   const [nextOrb, setNextOrb] = useState<number>(() => dealOrb(null, {}));
+  const [heldOrb, setHeldOrb] = useState<number | null>(null);
+  const [holdLocked, setHoldLocked] = useState(false);
   // Markov dealer state: dropped-level history + live board counts.
   const dropHistoryRef = useRef<number[]>([]);
   const boardCountsRef = useRef<Record<number, number>>({});
@@ -726,6 +728,7 @@ export default function App() {
       if (u.drop_charged(x)) {
         sfx.charged();
         setGauge(0);
+        setHoldLocked(false);
         return;
       }
     }
@@ -735,7 +738,23 @@ export default function App() {
       const hist = [...dropHistoryRef.current.slice(-1), nextOrb];
       dropHistoryRef.current = hist;
       setNextOrb(dealOrb(hist.length === 2 ? [hist[0], hist[1]] : null, boardCountsRef.current));
+      setHoldLocked(false);
     }
+  };
+
+  // Hold slot: park next orb, swap back later. One hold per drop.
+  const doHold = () => {
+    const u = universeRef.current;
+    if (!u || !startedRef.current || pausedRef.current || u.is_game_over() || u.is_victory()) return;
+    if (holdLocked) return;
+    sfx.unlock();
+    const hist = dropHistoryRef.current;
+    const r = holdSwap(heldOrb, nextOrb, false, () =>
+      dealOrb(hist.length === 2 ? [hist[0], hist[1]] : null, boardCountsRef.current));
+    setHeldOrb(r.held);
+    setNextOrb(r.next);
+    setHoldLocked(true);
+    sfx.hold();
   };
 
   const handlePointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
@@ -857,6 +876,8 @@ export default function App() {
     setNewBadges([]);
     dropHistoryRef.current = [];
     boardCountsRef.current = {};
+    setHeldOrb(null);
+    setHoldLocked(false);
     setNextOrb(dealOrb(null, {}));
     music.setWave(1);
   };
@@ -966,6 +987,9 @@ export default function App() {
           combo={combo}
           comboFrac={comboFrac}
           nextOrb={nextOrb}
+          heldOrb={heldOrb}
+          holdLocked={holdLocked}
+          onHold={doHold}
           surgeLeft={surgeLeft}
           freezeLeft={freezeLeft}
           bestScore={highs.bestScores[mode] ?? 0}
@@ -1015,6 +1039,9 @@ export default function App() {
             } else if (e.key === ' ') {
               e.preventDefault();
               commitDrop(u.get_player_x());
+            } else if (e.key === 'h' || e.key === 'H') {
+              e.preventDefault();
+              doHold();
             } else if (e.key === 'Escape') togglePause();
           }}
           onPointerDown={handlePointerDown}
