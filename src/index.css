@@ -20,8 +20,12 @@ canvas {
   -webkit-tap-highlight-color: transparent;
 }
 
-/* Phone browser chrome and display cutouts stay outside the playable arena. */
+/* Phone browser chrome and display cutouts stay outside the playable arena.
+   The shell is viewport-pinned (not % chained through html/body/#root) so a
+   collapsed ancestor in any WebView can never squash or clip the frame. */
 .game-shell {
+  position: fixed;
+  inset: 0;
   display: flex;
   justify-content: center;
   width: 100%;
