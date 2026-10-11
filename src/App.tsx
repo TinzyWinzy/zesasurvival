@@ -97,7 +97,7 @@ export default function App() {
   const seenBossRef = useRef(false);
   const prevHpRef = useRef(100);
   const pausedMsRef = useRef(0);
-  const aimRef = useRef({ active: false, x: 0, level: 1, charged: false });
+  const aimRef = useRef({ active: false, x: 0, y: 0, level: 1, charged: false });
   const fpsEmaRef = useRef(60);
   const perfModeRef = useRef(1);
   const lastPerfCheckRef = useRef(0);
@@ -137,6 +137,10 @@ export default function App() {
   const [relayCount, setRelayCount] = useState(0);
   const [relayArmed, setRelayArmed] = useState(false);
   const relayArmedRef = useRef(false);
+  const [fissionArmed, setFissionArmed] = useState(false);
+  const fissionArmedRef = useRef(false);
+  const [fusionFlash, setFusionFlash] = useState(false);
+  const prevTierRef = useRef(0);
   const pauseDialogRef = useDialogFocus(paused && started && !gameOver);
   const [isOffline, setIsOffline] = useState(
     typeof navigator !== 'undefined' ? !navigator.onLine : false
@@ -340,6 +344,17 @@ export default function App() {
               setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 3000);
             }
             prevRelayCountRef.current = prelayCount;
+            // Fusion finale: tier-10 birth flashes the board once per run.
+            const pmergeTier = copy[22] | 0;
+            if (pmergeTier === 10 && prevTierRef.current !== 10) {
+              sfx.fusion();
+              setFusionFlash(true);
+              setTimeout(() => setFusionFlash(false), 700);
+              const id = ++toastIdRef.current;
+              setToasts((t) => [...t.slice(-2), { id, title: 'FUSION', desc: 'A miniature sun. The grid drinks deep.' }]);
+              setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 4000);
+            }
+            prevTierRef.current = pmergeTier;
             // Wave banners (non-blocking) + stinger + music intensity.
             if (pwave > waveRef.current) {
               waveRef.current = pwave;
@@ -547,7 +562,27 @@ export default function App() {
 
               // Aim preview: ghost lane for touch players (hold, aim, release).
               const aim = aimRef.current;
-              if (aim.active && relayArmedRef.current) {
+              if (aim.active && fissionArmedRef.current) {
+                // Fission crosshair follows the touch point itself.
+                ctx.save();
+                ctx.setLineDash([4, 4]);
+                ctx.strokeStyle = 'rgba(240,171,252,0.85)';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.arc(aim.x, aim.y, 48, 0, Math.PI * 2);
+                ctx.stroke();
+                ctx.beginPath();
+                ctx.moveTo(aim.x - 58, aim.y);
+                ctx.lineTo(aim.x - 38, aim.y);
+                ctx.moveTo(aim.x + 38, aim.y);
+                ctx.lineTo(aim.x + 58, aim.y);
+                ctx.moveTo(aim.x, aim.y - 58);
+                ctx.lineTo(aim.x, aim.y - 38);
+                ctx.moveTo(aim.x, aim.y + 38);
+                ctx.lineTo(aim.x, aim.y + 58);
+                ctx.stroke();
+                ctx.restore();
+              } else if (aim.active && relayArmedRef.current) {
                 ctx.save();
                 ctx.setLineDash([6, 6]);
                 ctx.strokeStyle = 'rgba(34,211,238,0.75)';
@@ -721,9 +756,24 @@ export default function App() {
     return (clientX - rect.left) * sizeRef.current.width / rect.width;
   };
 
-  const commitDrop = (x: number) => {
+  const canvasY = (clientY: number) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return 0;
+    const rect = canvas.getBoundingClientRect();
+    return (clientY - rect.top) * sizeRef.current.height / rect.height;
+  };
+
+  const commitDrop = (x: number, y?: number) => {
     const u = universeRef.current;
     if (!u || !startedRef.current || pausedRef.current || u.is_game_over() || u.is_victory()) return;
+    // Fission tap needs a canvas point: keyboard has none, so it stays armed.
+    if (fissionArmedRef.current) {
+      if (y == null || !Number.isFinite(y)) return;
+      fissionArmedRef.current = false;
+      setFissionArmed(false);
+      if (u.fission_orb(x, y)) sfx.fission();
+      return;
+    }
     // Armed placement is a deliberate spend: it never also drops a cell.
     if (relayArmedRef.current) {
       relayArmedRef.current = false;
@@ -778,10 +828,10 @@ export default function App() {
     if (!Number.isFinite(x)) return;
     u.move_player(x);
     if (e.pointerType === 'mouse') {
-      commitDrop(x); // desktop: instant
+      commitDrop(x, canvasY(e.clientY)); // desktop: instant
     } else {
       // Touch/pen: hold-aim ghost, release to commit.
-      aimRef.current = { active: true, x, level: nextOrb, charged: gauge >= 100 };
+      aimRef.current = { active: true, x, y: canvasY(e.clientY), level: nextOrb, charged: gauge >= 100 };
     }
   };
 
@@ -791,16 +841,20 @@ export default function App() {
     const x = canvasX(e.clientX);
     if (!Number.isFinite(x)) return;
     u.move_player(x);
-    if (aimRef.current.active) aimRef.current.x = x;
+    if (aimRef.current.active) {
+      aimRef.current.x = x;
+      aimRef.current.y = canvasY(e.clientY);
+    }
   };
 
   const handlePointerUp = (e: React.PointerEvent<HTMLCanvasElement>) => {
     if (!aimRef.current.active) return;
     const x = canvasX(e.clientX);
+    const y = canvasY(e.clientY);
     aimRef.current.active = false;
     if (gameOver || pausedRef.current || loading || loadError) return;
     if (!Number.isFinite(x)) return;
-    commitDrop(x);
+    commitDrop(x, y);
   };
 
   const handlePointerCancel = () => {
@@ -831,8 +885,20 @@ export default function App() {
 
   const toggleRelay = useCallback(() => {
     sfx.unlock();
+    fissionArmedRef.current = false;
+    setFissionArmed(false);
     setRelayArmed((a) => {
       relayArmedRef.current = !a;
+      return !a;
+    });
+  }, []);
+
+  const toggleFission = useCallback(() => {
+    sfx.unlock();
+    relayArmedRef.current = false;
+    setRelayArmed(false);
+    setFissionArmed((a) => {
+      fissionArmedRef.current = !a;
       return !a;
     });
   }, []);
@@ -853,7 +919,11 @@ export default function App() {
     lastPerfCheckRef.current = 0;
     prevHpRef.current = 100;
     pausedMsRef.current = 0;
-    aimRef.current = { active: false, x: 0, level: 1, charged: false };
+    aimRef.current = { active: false, x: 0, y: 0, level: 1, charged: false };
+    fissionArmedRef.current = false;
+    setFissionArmed(false);
+    setFusionFlash(false);
+    prevTierRef.current = 0;
     relayArmedRef.current = false;
     setRelayArmed(false);
     setRelayCount(0);
@@ -988,6 +1058,12 @@ export default function App() {
             transition: 'opacity 1s linear'
           }}
         />
+        {/* Fusion flash: white bloom over everything, then gone. */}
+        <div
+          aria-hidden
+          className="absolute inset-0 z-40 bg-amber-50 pointer-events-none"
+          style={{ opacity: fusionFlash ? 0.85 : 0, transition: 'opacity 0.6s ease-out' }}
+        />
         <HUD
           score={score}
           level={level}
@@ -1091,9 +1167,9 @@ export default function App() {
           </div>
         )}
 
-        {/* Relay deployment: arms a placement instead of the next cell drop. */}
+        {/* Relay + fission deployment: armed placements, never cell drops. */}
         {started && !gameOver && !loading && !loadError && (
-          <div className="absolute bottom-4 left-4 z-30">
+          <div className="absolute bottom-4 left-4 z-30 flex flex-col gap-2">
             <button
               onClick={toggleRelay}
               aria-pressed={relayArmed}
@@ -1111,6 +1187,24 @@ export default function App() {
             >
               <span className="text-[13px] leading-none" aria-hidden>⚡</span>
               <span className="text-[9px] font-black leading-none mt-0.5">{relayCount}/2</span>
+            </button>
+            <button
+              onClick={toggleFission}
+              aria-pressed={fissionArmed}
+              aria-label={
+                fissionArmed
+                  ? 'Cancel fission tap'
+                  : 'Split a cell for chain fuel, costs 40 charge'
+              }
+              disabled={!fissionArmed && gauge < 40}
+              className={`w-11 h-11 rounded-full border shadow-xl leading-none flex flex-col items-center justify-center ${
+                fissionArmed
+                  ? 'bg-fuchsia-300 border-fuchsia-100 text-slate-950'
+                  : 'bg-slate-800/85 border-slate-600 text-fuchsia-200'
+              } disabled:opacity-30 disabled:cursor-not-allowed`}
+            >
+              <span className="text-[13px] leading-none" aria-hidden>⚛</span>
+              <span className="text-[9px] font-black leading-none mt-0.5">40</span>
             </button>
           </div>
         )}

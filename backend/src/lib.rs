@@ -99,6 +99,11 @@ const BOSS_TELEGRAPH_TIME: f32 = 2.5;
 const BOSS_ENERGY_BURST: usize = 8;
 const BOSS_CONTACT_DPS: f32 = 10.0;
 const MAX_BOSSES: usize = 1;
+// Fusion finale: the first tier-10 birth goes supercritical.
+const FUSION_DAMAGE: f32 = 500.0;
+// Fission tap: split one of your cells for chain fuel.
+const FISSION_COST: f32 = 40.0;
+const FISSION_TAP_RADIUS: f32 = 48.0;
 // Player maturity: each level hardens the battery and sharpens merge
 // damage, answering enemy HP/speed scaling with level.
 const LEVEL_HP_GAIN: f32 = 4.0;
@@ -244,6 +249,7 @@ pub struct Universe {
     frame_count: u64,
     seed: u64, // daily-grid spawn seed; 0 = unseeded variety
     boss_spawned: bool, // Kariba Night Shift enters once per run
+    fusion_spent: bool, // tier-10 birth goes supercritical once per run
     game_over: bool,
     victory: bool,
     wave: u32,
@@ -323,6 +329,7 @@ impl Universe {
             frame_count: 0,
             seed: 0,
             boss_spawned: false,
+            fusion_spent: false,
             game_over: false,
             victory: false,
             wave: 1,
@@ -412,6 +419,72 @@ impl Universe {
 
     pub fn get_relay_count(&self) -> usize {
         self.relays.len()
+    }
+
+    /// Fission tap: split one of your cells (level 2+) into two of the tier
+    /// below for chain fuel. Costs charge; aimed by tap coordinates.
+    pub fn fission_orb(&mut self, x: f32, y: f32) -> bool {
+        if self.game_over || self.victory {
+            return false;
+        }
+        if self.gauge < FISSION_COST || self.orbs.len() + 1 > MAX_ORBS {
+            return false;
+        }
+        if !x.is_finite() || !y.is_finite() {
+            return false;
+        }
+        let mut best: Option<usize> = None;
+        let mut best_d2 = FISSION_TAP_RADIUS * FISSION_TAP_RADIUS;
+        for (idx, orb) in self.orbs.iter().enumerate() {
+            if orb.is_merged || orb.level < 2 {
+                continue;
+            }
+            let dx = orb.x - x;
+            let dy = orb.y - y;
+            let d2 = dx * dx + dy * dy;
+            if d2 < best_d2 {
+                best_d2 = d2;
+                best = Some(idx);
+            }
+        }
+        let idx = match best {
+            Some(i) => i,
+            None => return false,
+        };
+        let src = self.orbs[idx].clone();
+        self.orbs.remove(idx);
+        self.gauge -= FISSION_COST;
+        let radius = orb_radius(src.level - 1);
+        for s in [-1.0f32, 1.0] {
+            self.orbs.push(Orb {
+                id: self.next_id,
+                x: (src.x + s * 14.0).clamp(20.0, (self.width - 20.0).max(20.0)),
+                y: src.y,
+                vx: s * 120.0,
+                vy: -60.0,
+                level: src.level - 1,
+                radius,
+                mass: radius * radius,
+                is_merged: false,
+            });
+            self.next_id += 1;
+        }
+        for k in 0..8 {
+            if self.particles.len() >= MAX_PARTICLES {
+                break;
+            }
+            let angle = (k as f32) * 6.28318 / 8.0;
+            self.particles.push(Particle {
+                x: src.x,
+                y: src.y,
+                vx: angle.cos() * 160.0,
+                vy: angle.sin() * 160.0,
+                life: 0.4,
+                max_life: 0.4,
+                color_tier: src.level,
+            });
+        }
+        true
     }
 
     pub fn get_player_x(&self) -> f32 { self.player_x }
@@ -1117,6 +1190,29 @@ impl Universe {
                             is_merged: false,
                         });
                         self.next_id += 1;
+                        // Fusion finale: the first tier-10 birth goes
+                        // supercritical — a miniature sun over the whole board.
+                        if next_level == 10 && !self.fusion_spent {
+                            self.fusion_spent = true;
+                            for enemy in self.enemies.iter_mut() {
+                                enemy.hp -= FUSION_DAMAGE;
+                            }
+                            for k in 0..50 {
+                                if self.particles.len() >= MAX_PARTICLES {
+                                    break;
+                                }
+                                let angle = (k as f32) * 6.28318 / 50.0;
+                                self.particles.push(Particle {
+                                    x: mid_x,
+                                    y: mid_y,
+                                    vx: angle.cos() * 260.0,
+                                    vy: angle.sin() * 260.0,
+                                    life: 0.9,
+                                    max_life: 0.9,
+                                    color_tier: 10,
+                                });
+                            }
+                        }
                         // A restrained discharge pushes neighbouring cells, not the entire pile.
                         for k in 0..orb_len {
                             if k == i || k == j || self.orbs[k].is_merged { continue; }
@@ -2133,6 +2229,81 @@ mod tests {
         assert!(u.enemies.is_empty());
         assert!(u.energies.len() >= BOSS_ENERGY_BURST);
         assert!(!u.particles.is_empty());
+    }
+
+    #[test]
+    fn fusion_finale_nukes_the_board_once() {
+        // Two T9s pushed directly: drop_orb only deals low tiers.
+        // Grunts sit off the player-beam lane but inside blast radius, so
+        // only the nuke (not blast+beam) can clear them.
+        let mk = || {
+            let mut u = Universe::new(480.0, 800.0);
+            u.next_xp = 100000; // no level-up mid-merge: maturity stays 1.0
+            for k in 0..3 {
+                u.enemies.push(Enemy {
+                    id: k, x: 100.0, y: 400.0, vx: 0.0, vy: 0.0,
+                    hp: 400.0, max_hp: 400.0, radius: 10.0, speed: 0.0,
+                    kind: 0, frozen_until: 0.0,
+                });
+            }
+            for k in 0..2 {
+                let r = orb_radius(9);
+                u.orbs.push(Orb {
+                    id: 100 + k, x: 240.0 + k as f32, y: 400.0,
+                    vx: 0.0, vy: 0.0, level: 9, radius: r,
+                    mass: r * r, is_merged: false,
+                });
+            }
+            u
+        };
+        // First T10 birth: 500-damage nuke vaporizes the 400hp grunts
+        // (the 280 merge blast alone would leave them standing).
+        let mut u = mk();
+        u.tick(0.016);
+        assert!(u.fusion_spent);
+        assert!(u.enemies.is_empty());
+        assert!(u.particles.len() >= 40);
+        // Spent: a second T10 is just a merge — grunts survive the blast.
+        let mut v = mk();
+        v.fusion_spent = true;
+        v.tick(0.016);
+        assert_eq!(v.enemies.len(), 3);
+        assert!(v.enemies.iter().all(|e| (e.hp - 120.0).abs() < 1.0));
+    }
+
+    #[test]
+    fn fission_splits_for_chain_fuel() {
+        let mut u = Universe::new(480.0, 800.0);
+        u.gauge = 100.0;
+        let r = orb_radius(3);
+        u.orbs.push(Orb {
+            id: 1, x: 240.0, y: 400.0, vx: 0.0, vy: 0.0,
+            level: 3, radius: r, mass: r * r, is_merged: false,
+        });
+        assert!(u.fission_orb(240.0, 400.0));
+        assert!((u.gauge - 60.0).abs() < 0.01);
+        assert_eq!(u.orbs.len(), 2);
+        assert!(u.orbs.iter().all(|o| o.level == 2));
+        assert!(!u.particles.is_empty());
+        // Level 1 refused, gauge kept.
+        u.orbs.clear();
+        let r1 = orb_radius(1);
+        u.orbs.push(Orb {
+            id: 2, x: 240.0, y: 400.0, vx: 0.0, vy: 0.0,
+            level: 1, radius: r1, mass: r1 * r1, is_merged: false,
+        });
+        assert!(!u.fission_orb(240.0, 400.0));
+        assert_eq!(u.orbs.len(), 1);
+        assert_eq!(u.gauge, 60.0);
+        // Empty tap and broke tap refused.
+        u.orbs.clear();
+        assert!(!u.fission_orb(50.0, 50.0));
+        u.gauge = 0.0;
+        u.orbs.push(Orb {
+            id: 3, x: 240.0, y: 400.0, vx: 0.0, vy: 0.0,
+            level: 2, radius: orb_radius(2), mass: 1.0, is_merged: false,
+        });
+        assert!(!u.fission_orb(240.0, 400.0));
     }
 
     #[test]

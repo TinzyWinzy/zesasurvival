@@ -129,6 +129,18 @@ class Sfx {
     this.tone(hz(440), 0.07, 'triangle', 0.25, hz(660));
   }
 
+  /** Fission crack: short downward snap as the cell splits. */
+  fission() {
+    this.tone(hz(700), 0.09, 'square', 0.28, hz(220));
+    this.tone(hz(350), 0.12, 'triangle', 0.2, hz(140), 0.03);
+  }
+
+  /** Fusion dawn: rising sweep into a deep bloom for the miniature sun. */
+  fusion() {
+    this.tone(hz(110), 0.6, 'sawtooth', 0.35, hz(880));
+    this.tone(hz(55), 0.8, 'sine', 0.4, hz(110), 0.15);
+  }
+
   /** A major arpeggio — the Picardy third that resolves the minor bed. */
   victory() {
     [440, 554.37, 659.25, 880].forEach((f, i) =>

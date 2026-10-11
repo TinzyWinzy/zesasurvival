@@ -39,7 +39,9 @@ u.free();
 // Relays: gauge sink is exported, refuses when broke, and the ABI carries the count.
 const relayWorld = new Universe(480, 800);
 assert.equal(typeof relayWorld.deploy_relay, 'function');
+assert.equal(typeof relayWorld.fission_orb, 'function');
 assert.equal(relayWorld.deploy_relay(240), false, 'broke: deployment must refuse');
+assert.equal(relayWorld.fission_orb(240, 400), false, 'broke: fission must refuse');
 assert.equal(frame(relayWorld)[33], 0);
 relayWorld.free();
 
